@@ -1,7 +1,7 @@
 #include "fruit_game_config.h"
 
 const uint16_t fruit_base_payouts[FRUIT_CATEGORY_COUNT] = {
-    6, 4, 4, 4, 3, 3, 3, 2,
+    6, 5, 5, 5, 4, 4, 4, 3,
 };
 
 /*
@@ -35,7 +35,7 @@ const fruit_track_cell_t fruit_track[FRUIT_TRACK_COUNT] = {
     {FRUIT_SYMBOL_BELL,   3, 0,   FRUIT_LUCK_NONE,  1},
 };
 
-const uint8_t fruit_luck_multipliers[] = {2, 2, 2, 3, 3, 5, 8, 10};
+const uint8_t fruit_luck_multipliers[] = {2, 2, 3, 3, 4, 5, 8, 10};
 const uint8_t fruit_luck_multiplier_count =
     sizeof(fruit_luck_multipliers) / sizeof(fruit_luck_multipliers[0]);
 
@@ -59,9 +59,9 @@ const fruit_game_tuning_t fruit_game_tuning = {
     .spin_steady_laps = 2,
     .spin_decel_min_steps = 24,
     .blue_luck_step_ms = 220,
-    .blue_luck_min_cells = 2,
-    .blue_luck_max_cells = 3,
-    .jackpot_trigger_basis_points = 50,
+    .blue_luck_min_cells = 3,
+    .blue_luck_max_cells = 4,
+    .jackpot_trigger_basis_points = 250,
     .jackpot_random_min_multiplier = 50,
     .jackpot_random_max_multiplier = 200,
     .jackpot_big_three_multiplier = 100,

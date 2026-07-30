@@ -172,13 +172,13 @@ The 24 positions begin at the upper-left and proceed clockwise:
 | Symbol | Base payout |
 | --- | ---: |
 | BAR | 6× or 12×, depending on the cell |
-| 77 | 4× |
-| Star | 4× |
-| Watermelon | 4× |
-| Bell | 3× |
-| Cyan fruit | 3× |
-| Orange | 3× |
-| Apple | 2× |
+| 77 | 5× |
+| Star | 5× |
+| Watermelon | 5× |
+| Bell | 4× |
+| Cyan fruit | 4× |
+| Orange | 4× |
+| Apple | 3× |
 
 An `X3` cell triples the applicable payout. The current configuration gives
 all 24 cells equal selection weight. The result is chosen with `esp_random()`
@@ -199,11 +199,12 @@ After an ordinary paid win:
 
 ### Special events
 
-- **Orange LUCK:** awards total bet × `2/2/2/3/3/5/8/10`.
-- **Blue LUCK:** resolves a chain of 2–3 consecutive cells. A LUCK cell inside
+- **Orange LUCK:** awards total bet × `2/2/3/3/4/5/8/10`.
+- **Blue LUCK:** resolves a chain of 3–4 consecutive cells. A LUCK cell inside
   the chain pays zero and does not recursively start another LUCK event.
-- **Rare jackpot:** includes All Lights, Big Three, Small Three, Eight
-  Immortals, and a random 50–200× total-bet reward.
+- **Rare jackpot:** triggers about once every 480 spins and includes All
+  Lights, Big Three, Small Three, Eight Immortals, and a random 50–200×
+  total-bet reward.
 - **Big Bang:** when credit reaches total maximum bet × 400, the center scene
   flashes and grants three automatic free spins while retaining the last bet.
 
