@@ -1,17 +1,52 @@
-# 怀旧水果机 / Nostalgic Fruit Machine
+<div align="center">
+  <h1>怀旧水果机</h1>
+  <p><strong>Nostalgic Fruit Machine for M5Stack StickS3</strong></p>
+  <p>
+    A pocket-sized retro arcade with motion controls,<br>
+    running lights, risk play, and a 30-gem collection.
+  </p>
+  <p>
+    <a href="#overview">Overview</a> ·
+    <a href="#complete-controls">Controls</a> ·
+    <a href="#game-rules">Game rules</a> ·
+    <a href="#gem-collection">Gems</a> ·
+    <a href="#build">Build</a> ·
+    <a href="README.zh-CN.md">简体中文</a>
+  </p>
+  <p>
+    <img alt="Hardware: M5Stack StickS3" src="https://img.shields.io/badge/hardware-M5Stack%20StickS3-EA1D2C">
+    <img alt="Display: 135 by 240" src="https://img.shields.io/badge/display-135%C3%97240-111111">
+    <img alt="ESP-IDF: 5.5" src="https://img.shields.io/badge/ESP--IDF-5.5-E7352C">
+    <img alt="Version: 0.6.0" src="https://img.shields.io/badge/version-0.6.0-F3A712">
+    <img alt="Mode: Offline" src="https://img.shields.io/badge/mode-offline-2E8B57">
+  </p>
+  <br>
+  <img src="assets/screenshots/nostalgic-fruit-machine-product.png" alt="Nostalgic Fruit Machine running on an M5Stack StickS3" width="480">
+</div>
 
-[中文说明](README.zh-CN.md) · English
+## Overview
 
-An offline retro running-light fruit game built specifically for the
-**M5Stack StickS3**. It combines a 24-cell light chase, eight symbol bets,
-small/big risk play, animated sound and lighting, four-direction motion
-selection, and a 30-gem collection system on a 135 × 240 display.
+Nostalgic Fruit Machine turns the StickS3 into a self-contained miniature
+arcade cabinet. The portrait display carries a full 24-cell board, six control
+buttons, eight symbol bets, live credit and bonus values, and a bright
+fruit-themed center scene—without a phone, account, or network connection.
+
+| | Capability | What it adds |
+| --- | --- | --- |
+| **01** | Retro running-light board | Accelerates, completes steady laps, decelerates, and stops precisely on a preselected result with synchronized light and sound. |
+| **02** | Motion-first control | Navigate the three control rows by tilting left, right, forward, or backward, with re-centering and pickup recovery. |
+| **03** | Layered risk and reward | Eight bets, X3 cells, two LUCK modes, small/big risk play, rare jackpots, Big Bang, and free spins. |
+| **04** | Long-term collection | Unlock 30 individually colored gemstones using cumulative winnings actually collected into credit. |
 
 > Entertainment only. All credits are virtual. The firmware has no recharge,
 > withdrawal, cash-out, advertising, account, analytics, or network-gambling
 > functionality.
 
-## Highlights
+> [!NOTE]
+> The hero image is a product render. Minor visual details may differ from the
+> current physical display and firmware revision.
+
+## Device experience
 
 - 24-cell clockwise running-light board with acceleration, steady laps,
   deceleration, synchronized audio, and illuminated active artwork.
@@ -204,6 +239,8 @@ task rather than inside animation timing.
 
 ```text
 .
+├── assets/screenshots/
+│   └── nostalgic-fruit-machine-product.png
 ├── README.md
 ├── README.zh-CN.md
 ├── docs/
@@ -272,7 +309,8 @@ per animation frame.
 
 ## Asset and dependency notes
 
-The interface and procedural game artwork are project-owned. The BMI270 driver
-is retained under `firmware/sticks3/third_party/bmi270/` with its upstream
-license. ESP-IDF managed dependencies are pinned by `dependencies.lock` and
-downloaded during configuration; they are not vendored into this repository.
+The interface, procedural game artwork, and product render are project-owned.
+The BMI270 driver is retained under `firmware/sticks3/third_party/bmi270/`
+with its upstream license. ESP-IDF managed dependencies are pinned by
+`dependencies.lock` and downloaded during configuration; they are not vendored
+into this repository.

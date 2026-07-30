@@ -1,15 +1,49 @@
-# 怀旧水果机 / Nostalgic Fruit Machine
+<div align="center">
+  <h1>怀旧水果机</h1>
+  <p><strong>专为 M5Stack StickS3 打造的掌上怀旧街机</strong></p>
+  <p>
+    四方向体感选择、24格跑灯、大小竞猜，<br>
+    再加一套可以长期收集的30颗宝石系统。
+  </p>
+  <p>
+    <a href="#项目概览">项目概览</a> ·
+    <a href="#完整操作说明">操作</a> ·
+    <a href="#游戏规则">玩法</a> ·
+    <a href="#30颗宝石收藏">宝石</a> ·
+    <a href="#编译">编译</a> ·
+    <a href="README.md">English</a>
+  </p>
+  <p>
+    <img alt="硬件：M5Stack StickS3" src="https://img.shields.io/badge/hardware-M5Stack%20StickS3-EA1D2C">
+    <img alt="屏幕：135 × 240" src="https://img.shields.io/badge/display-135%C3%97240-111111">
+    <img alt="ESP-IDF：5.5" src="https://img.shields.io/badge/ESP--IDF-5.5-E7352C">
+    <img alt="版本：0.6.0" src="https://img.shields.io/badge/version-0.6.0-F3A712">
+    <img alt="模式：完全离线" src="https://img.shields.io/badge/mode-%E5%AE%8C%E5%85%A8%E7%A6%BB%E7%BA%BF-2E8B57">
+  </p>
+  <br>
+  <img src="assets/screenshots/nostalgic-fruit-machine-product.png" alt="M5Stack StickS3 上运行的怀旧水果机" width="480">
+</div>
 
-中文 · [English](README.md)
+## 项目概览
 
-一款专为 **M5Stack StickS3** 制作的离线怀旧跑灯水果机。它在
-135 × 240 竖屏上集成了24格跑灯、8类图标押注、大小竞猜、声光动画、
-四方向体感选择和30颗宝石收藏系统。
+怀旧水果机把 StickS3 变成一台可以握在手里的独立迷你街机：135 × 240
+竖屏中完整容纳24格转盘、6个功能按钮、8类图标押注、CREDIT 和 BONUS WIN，
+以及色彩鲜明的水果主题中间画面；不需要手机、账户或网络。
+
+| | 核心能力 | 带来的体验 |
+| --- | --- | --- |
+| **01** | 怀旧跑灯转盘 | 加速、匀速跑圈、减速并精确停在预定结果，灯光与声音同步。 |
+| **02** | 四方向体感操作 | 前、后、左、右倾斜即可在三排按钮间选择，并带回中锁和拿起恢复。 |
+| **03** | 多层奖励玩法 | 8类押注、X3、两种 LUCK、大小竞猜、稀有大奖、Big Bang 和免费转动。 |
+| **04** | 长期宝石收藏 | 只用实际收取的累计中奖金币，逐级点亮30颗不同颜色的宝石。 |
 
 > 本项目仅供娱乐。所有 CREDIT 均为虚拟分数，不包含充值、提现、兑换现金、
 > 广告、账户、数据分析或联网赌博功能。
 
-## 主要特色
+> [!NOTE]
+> 顶部图片为产品效果图，个别视觉细节可能与当前实机屏幕和固件版本略有差异。
+
+## 设备体验
 
 - 24格顺时针跑灯，包含加速、匀速、减速、同步音效和当前图标逆光点亮效果。
 - 8类图标分别押注 `00`–`99`，并提供 `ALL+1`、`2X`、`CLR`、大小和
@@ -189,6 +223,8 @@ NVS 会保存：
 
 ```text
 .
+├── assets/screenshots/
+│   └── nostalgic-fruit-machine-product.png
 ├── README.md
 ├── README.zh-CN.md
 ├── docs/
@@ -254,7 +290,7 @@ NVS 任务不会在每帧动画中创建新的界面对象。
 
 ## 素材和依赖说明
 
-界面与程序化游戏美术为本项目素材。BMI270 驱动保留在
+界面、程序化游戏美术和产品效果图均为本项目素材。BMI270 驱动保留在
 `firmware/sticks3/third_party/bmi270/`，并附带原始开源许可。
 ESP-IDF 托管依赖由 `dependencies.lock` 锁定并在配置阶段下载，不作为
 第三方缓存整体提交到仓库。
