@@ -1,0 +1,156 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>VibeStick Fruit Machine — portrait static board</title>
+<style>
+  html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #090705; }
+  canvas { display: block; width: 540px; height: 960px; image-rendering: pixelated; }
+</style>
+<canvas id="screen" width="135" height="240"></canvas>
+<script>
+const canvas = document.querySelector("#screen");
+const c = canvas.getContext("2d");
+c.imageSmoothingEnabled = false;
+
+const track = [
+  ["orange",1],["bell",1],["bar",50],["bar",100],["apple",1],["apple",3],["cyan",1],
+  ["melon",1],["melon",3],["luckBlue",1],["apple",1],["orange",3],
+  ["orange",1],["bell",1],["seven",3],["seven",1],["apple",1],["cyan",3],
+  ["cyan",1],["star",1],["star",3],["luckOrange",1],["apple",1],["bell",3]
+];
+
+function box(x,y,w,h,fill,stroke="#93451f") {
+  c.fillStyle=fill; c.fillRect(x,y,w,h);
+  c.strokeStyle=stroke; c.lineWidth=1; c.strokeRect(x+.5,y+.5,w-1,h-1);
+}
+function txt(s,x,y,size=5,color="#fff",align="center",weight="700") {
+  c.fillStyle=color; c.font=`${weight} ${size}px Arial, sans-serif`;
+  c.textAlign=align; c.textBaseline="middle"; c.fillText(s,x,y);
+}
+function circle(x,y,r,color) { c.fillStyle=color; c.beginPath(); c.arc(x,y,r,0,Math.PI*2); c.fill(); }
+function line(x1,y1,x2,y2,color,w=1) {
+  c.strokeStyle=color; c.lineWidth=w; c.beginPath(); c.moveTo(x1,y1); c.lineTo(x2,y2); c.stroke();
+}
+const sevenSegmentMap = {
+  0:[1,1,1,1,1,1,0], 1:[0,1,1,0,0,0,0], 2:[1,1,0,1,1,0,1],
+  3:[1,1,1,1,0,0,1], 4:[0,1,1,0,0,1,1], 5:[1,0,1,1,0,1,1],
+  6:[1,0,1,1,1,1,1], 7:[1,1,1,0,0,0,0], 8:[1,1,1,1,1,1,1],
+  9:[1,1,1,1,0,1,1]
+};
+function headerDigit(digit,x,y,color){
+  const s=sevenSegmentMap[digit], segments=[
+    [x+1,y,3,1],[x+4,y+1,1,2],[x+4,y+4,1,2],[x+1,y+6,3,1],
+    [x,y+4,1,2],[x,y+1,1,2],[x+1,y+3,3,1]
+  ];
+  for(let i=0;i<7;i++) if(s[i]){ c.fillStyle=color; c.fillRect(...segments[i]); }
+}
+function headerNumber(value,x,slots,minimumDigits){
+  const shown=String(Math.max(0,value)).padStart(minimumDigits,"0").slice(-slots);
+  for(let i=0;i<slots;i++) headerDigit(8,x+i*6,10,"#321713");
+  const start=slots-shown.length;
+  for(let i=0;i<shown.length;i++) headerDigit(Number(shown[i]),x+(start+i)*6,10,"#ff6a48");
+}
+function symbol(kind,cx,cy,mult) {
+  if(kind==="apple"){
+    circle(cx-2,cy,4,"#d92f2f"); circle(cx+2,cy,4,"#ef4742");
+    circle(cx,cy+3,4,"#e43a35");
+    c.fillStyle="#6d3b25"; c.fillRect(cx-1,cy-9,2,4);
+    c.fillStyle="#66bd48"; c.fillRect(cx+1,cy-8,4,2);
+    circle(cx-3,cy-1,1,"#ff9a91");
+  } else if(kind==="orange"){
+    circle(cx,cy+1,5,"#ff9b15"); circle(cx-2,cy-1,1,"#ffe09a");
+    c.fillStyle="#69c34b"; c.fillRect(cx+1,cy-6,4,2);
+  } else if(kind==="cyan"){
+    circle(cx,cy+1,5,"#4fd5b8"); circle(cx,cy-3,3,"#74ebcf");
+    line(cx,cy-3,cx+1,cy-7,"#73412a");
+  } else if(kind==="bell"){
+    c.fillStyle="#ffcc32"; c.fillRect(cx-4,cy-4,9,8); c.fillRect(cx-5,cy+3,11,2);
+    circle(cx,cy+6,1,"#e99d14");
+  } else if(kind==="melon"){
+    c.fillStyle="#ef5350"; c.beginPath(); c.moveTo(cx,cy-6); c.lineTo(cx-6,cy+5); c.lineTo(cx+6,cy+5); c.closePath(); c.fill();
+    line(cx,cy-6,cx-6,cy+5,"#71c837",2); line(cx-6,cy+5,cx+6,cy+5,"#71c837",2); line(cx+6,cy+5,cx,cy-6,"#71c837",2);
+  } else if(kind==="star"){
+    c.fillStyle="#ffd740"; c.beginPath();
+    for(let i=0;i<10;i++){ const a=-Math.PI/2+i*Math.PI/5, r=i%2?3:7; const x=cx+Math.cos(a)*r,y=cy+Math.sin(a)*r; i?c.lineTo(x,y):c.moveTo(x,y); }
+    c.closePath(); c.fill();
+  } else if(kind==="seven"){ txt("77",cx,cy,7,"#ff4438"); }
+  else if(kind==="bar"){
+    c.fillStyle="#f5ead2"; c.fillRect(cx-8,cy-5,16,10); txt("BAR",cx,cy,4,"#18100c");
+  } else {
+    const orange=kind==="luckOrange"; circle(cx,cy,7,orange?"#ff8a22":"#1e9dff");
+    txt("L",cx,cy,7,"#fff");
+  }
+  if(mult===3){ c.fillStyle="#17100d"; c.fillRect(cx+1,cy+3,9,6); txt("X3",cx+5.5,cy+6,4,"#fff"); }
+  if(kind==="bar"){ txt(`X${mult}`,cx,cy+7,4,"#ffd740"); }
+}
+function pos(i){
+  if(i<7)return [1+i*19,22];
+  if(i<12)return [115,22+(i-6)*19];
+  if(i<19)return [1+(18-i)*19,136];
+  return [1,22+(24-i)*19];
+}
+
+c.fillStyle="#090705"; c.fillRect(0,0,135,240);
+c.fillStyle="#160b08"; c.fillRect(0,0,135,22);
+const headerImage=new Image();
+headerImage.onload=()=>{
+  c.drawImage(headerImage,0,0,135,22);
+  headerNumber(0,14,6,3);
+  headerNumber(100,86,6,3);
+};
+headerImage.src="../firmware/sticks3/assets/fruit_header.png";
+
+for(let i=0;i<24;i++){
+  const [x,y]=pos(i); box(x,y,19,19,i===0?"#68230e":"#25130d",i===0?"#ffdf3f":"#93451f");
+  symbol(track[i][0],x+9.5,y+9.5,track[i][1]);
+}
+
+const ix=20,iy=41;
+box(ix,iy,95,95,"#10172a","#b45924");
+const centerImage=new Image();
+centerImage.onload=()=>{
+  c.drawImage(centerImage,ix,iy,95,95);
+  box(ix+35,iy+75,25,16,"#100807","#8d3226");
+  txt("00",ix+47.5,iy+83,10,"#ff6a42","center","500");
+};
+centerImage.src="../firmware/sticks3/assets/fiery_dragon_center.png";
+
+const controlsImage=new Image();
+controlsImage.onload=()=>{
+  c.drawImage(controlsImage,0,155,135,40);
+  c.strokeStyle="#fff06a"; c.strokeRect(105.5,156.5,28,36);
+};
+controlsImage.src="../firmware/sticks3/assets/fruit_controls.png";
+const bets=["bar","seven","star","melon","bell","cyan","orange","apple"];
+for(let i=0;i<8;i++){
+  const bx=(i%4)*34, by=195+Math.floor(i/4)*22, w=i%4===3?33:34;
+  box(bx,by,w,22,"#122218","#3d633f"); symbol(bets[i],bx+11,by+11,1); txt("0",bx+25,by+11,6,"#687468");
+}
+
+const trackImage=new Image();
+trackImage.onload=()=>{
+  for(let i=0;i<24;i++){
+    const [tx,ty]=pos(i);
+    c.drawImage(trackImage,i*19,0,19,19,tx,ty,19,19);
+    if(i===2 || i===3){
+      c.fillStyle="#ffe5af"; c.fillRect(tx+1,ty+2,17,7);
+      txt("BAR",tx+9.5,ty+5.5,5,"#1c1008");
+      c.fillStyle="#ffe5af"; c.fillRect(tx+1,ty+10,17,7);
+      txt(i===2?"50":"100",tx+9.5,ty+13.5,5,"#1c1008");
+    }
+    c.strokeStyle=i===0?"#ffee36":"#6d2b0b";
+    c.strokeRect(tx+.5,ty+.5,18,18);
+    if(i===0){ c.strokeStyle="#ff9d00"; c.strokeRect(tx+1.5,ty+1.5,16,16); }
+  }
+  const symbolTiles=[2,15,19,7,1,6,0,4];
+  for(let i=0;i<8;i++){
+    const bx=(i%4)*34, by=195+Math.floor(i/4)*22;
+    c.drawImage(trackImage,symbolTiles[i]*19,0,19,19,bx+1,by+2,19,19);
+    if(i===0){
+      c.fillStyle="#ffe5af"; c.fillRect(bx+2,by+4,17,15);
+      txt("BAR",bx+10.5,by+11.5,5,"#1c1008");
+    }
+    txt("0",bx+26,by+11,6,"#687468");
+  }
+};
+trackImage.src="../firmware/sticks3/assets/fruit_track_tiles.png";
+</script>

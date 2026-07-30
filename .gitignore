@@ -1,0 +1,37 @@
+# macOS and editor state
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Local secrets and credentials
+.env
+.env.*
+*.key
+*.pem
+*.token
+secrets.*
+
+# ESP-IDF generated state and downloaded component caches
+build/
+firmware/sticks3/build/
+firmware/sticks3/managed_components/
+firmware/sticks3/sdkconfig
+firmware/sticks3/sdkconfig.old
+firmware/sticks3/sdkconfig.*
+!firmware/sticks3/sdkconfig.defaults
+
+# Generated firmware and runtime diagnostics
+*.bin
+*.elf
+*.map
+*.uf2
+*.log
+core
+core.*
+
+# Python cache
+__pycache__/
+*.py[cod]
