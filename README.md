@@ -21,7 +21,7 @@
     <img alt="Mode: Offline" src="https://img.shields.io/badge/mode-offline-2E8B57">
   </p>
   <br>
-  <img src="assets/screenshots/nostalgic-fruit-machine-product.png" alt="Nostalgic Fruit Machine running on an M5Stack StickS3" width="480">
+  <img src="assets/screenshots/fruit-machine-neon-showcase.png" alt="Nostalgic Fruit Machine running on an M5Stack StickS3 in a neon arcade" width="900">
 </div>
 
 ## Overview
@@ -43,8 +43,8 @@ fruit-themed center scene—without a phone, account, or network connection.
 > functionality.
 
 > [!NOTE]
-> The hero image is a product render. Minor visual details may differ from the
-> current physical display and firmware revision.
+> The promotional images are product renders. Minor visual details may differ
+> from the current physical display and firmware revision.
 
 ## Device experience
 
@@ -211,6 +211,10 @@ After an ordinary paid win:
 ## Gem collection
 
 Long-press the side button to open a full-screen 5 × 6 gallery of 30 gems.
+
+<div align="center">
+  <img src="assets/screenshots/gem-collection-level-up-showcase.png" alt="The 30-gem collection gallery on an M5Stack StickS3" width="900">
+</div>
 
 - Gem 1 is available at 0 cumulative collected winnings.
 - Gem level `n` unlocks at `50 × (n - 1) × n`.
