@@ -17,7 +17,7 @@
     <img alt="Hardware: M5Stack StickS3" src="https://img.shields.io/badge/hardware-M5Stack%20StickS3-EA1D2C">
     <img alt="Display: 135 by 240" src="https://img.shields.io/badge/display-135%C3%97240-111111">
     <img alt="ESP-IDF: 5.5" src="https://img.shields.io/badge/ESP--IDF-5.5-E7352C">
-    <img alt="Version: 0.6.0" src="https://img.shields.io/badge/version-0.6.0-F3A712">
+    <img alt="Version: 0.6.1" src="https://img.shields.io/badge/version-0.6.1-F3A712">
     <img alt="Mode: Offline" src="https://img.shields.io/badge/mode-offline-2E8B57">
   </p>
   <br>
@@ -77,7 +77,7 @@ fruit-themed center scene—without a phone, account, or network connection.
 | Audio | ES8311 codec and onboard speaker |
 | Framework | ESP-IDF 5.5.x |
 | UI | LVGL |
-| Current firmware | 0.6.0 |
+| Current firmware | 0.6.1 |
 
 Directional selection uses accelerometer samples only. Gyroscope angle
 integration is not used.
@@ -309,7 +309,7 @@ Every boot runs a 1,000-round allocation-free logic test covering:
 A healthy startup includes:
 
 ```text
-boot VibeStick Fruit Machine 0.6.0 gem-gallery
+boot VibeStick Fruit Machine 0.6.1 gem-gallery bet-costs
 1000-round logic self-test PASS heap_delta=0
 display portrait 135x240
 ```
