@@ -57,7 +57,7 @@ fruit-themed center scene—without a phone, account, or network connection.
   its neutral pose before the next move.
 - Automatic pickup recovery after the device has been left resting.
 - Small/big risk mode with selectable 25%, 50%, 75%, or 100% participation.
-- Orange LUCK, blue LUCK, rare jackpot events, Big Bang, and free spins.
+- Orange LUCK, blue LUCK, Big Bang, and free spins.
 - 30 unlockable gemstones driven only by cumulative collected winnings.
 - Persistent credit, bets, statistics, sound state, game state, and gem
   progress through NVS.
@@ -125,6 +125,7 @@ or gem gallery is active.
 | Gesture | Action |
 | --- | --- |
 | Single press | Add 5 virtual credits |
+| Four quick presses | Reset current credit to 0 |
 | Double press | Select the previous control |
 | Long press, about 0.9 s | Open or close the 30-gem collection |
 
@@ -153,7 +154,8 @@ risk percentage.
 - A new installation starts at `0` credits.
 - Each side-button single press adds 5 virtual credits.
 - Each of the eight categories accepts `00`–`99`.
-- `GO` deducts the total bet.
+- Clicking a symbol deducts its configured per-unit cost. A retained bet is
+  charged when the next spin starts; prepaid clicks are not charged twice.
 - Play may continue below zero; credit is bounded at `-99,999`.
 - Top-ups never count toward gem progress.
 
@@ -162,28 +164,30 @@ risk percentage.
 The 24 positions begin at the upper-left and proceed clockwise:
 
 ```text
-00 Orange, 01 Bell, 02 BAR 6x, 03 BAR 12x, 04 Apple, 05 Apple X3,
+00 Orange, 01 Bell, 02 BAR 50x, 03 BAR 100x, 04 Apple, 05 Apple X3,
 06 Cyan fruit, 07 Watermelon, 08 Watermelon X3, 09 Blue LUCK,
 10 Apple, 11 Orange X3, 12 Orange, 13 Bell, 14 77 X3, 15 77,
 16 Apple, 17 Cyan fruit X3, 18 Cyan fruit, 19 Star, 20 Star X3,
 21 Orange LUCK, 22 Apple, 23 Bell X3
 ```
 
-| Symbol | Base payout |
-| --- | ---: |
-| BAR | 6× or 12×, depending on the cell |
-| 77 | 5× |
-| Star | 5× |
-| Watermelon | 5× |
-| Bell | 4× |
-| Cyan fruit | 4× |
-| Orange | 4× |
-| Apple | 3× |
+| Symbol | Unit cost | Normal payout |
+| --- | ---: | ---: |
+| BAR | 10 | 50× or 100×, depending on the cell |
+| 77 | 8 | 40× |
+| Star | 6 | 30× |
+| Watermelon | 4 | 20× |
+| Bell | 5 | 20× |
+| Cyan fruit | 3 | 15× |
+| Orange | 2 | 10× |
+| Apple | 1 | 5× |
 
-An `X3` cell triples the applicable payout. The current configuration gives
-all 24 cells equal selection weight. The result is chosen with `esp_random()`
+An `X3` cell pays bet units ×3 and does not also apply the normal symbol
+multiplier. The result is chosen with `esp_random()` using per-cell weights
 before animation; the state machine then calculates the exact number of steps
-required to stop on it after at least two steady laps.
+required to stop on it after at least two steady laps. The balanced weights
+target about 106.36% theoretical return and a 29.27% net-win rate for one unit
+on every symbol, before optional small/big gambling.
 
 ### Pending win: small, big, or collect
 
@@ -199,12 +203,9 @@ After an ordinary paid win:
 
 ### Special events
 
-- **Orange LUCK:** awards total bet × `2/2/3/3/4/5/8/10`.
-- **Blue LUCK:** resolves a chain of 3–4 consecutive cells. A LUCK cell inside
+- **Orange LUCK:** awards total bet × `2/3/5/8/10/20/20`.
+- **Blue LUCK:** resolves a chain of exactly 5 consecutive cells. A LUCK cell inside
   the chain pays zero and does not recursively start another LUCK event.
-- **Rare jackpot:** triggers about once every 480 spins and includes All
-  Lights, Big Three, Small Three, Eight Immortals, and a random 50–200×
-  total-bet reward.
 - **Big Bang:** when credit reaches total maximum bet × 400, the center scene
   flashes and grants three automatic free spins while retaining the last bet.
 
@@ -220,7 +221,8 @@ Long-press the side button to open a full-screen 5 × 6 gallery of 30 gems.
 - Gem level `n` unlocks at `50 × (n - 1) × n`.
 - Gem 2 unlocks at 100; gem 30 unlocks at 43,500.
 - Locked gems are grayscale; unlocked gems use their individual colors.
-- Only winnings actually collected into credit advance the gallery.
+- Only the positive-balance portion of winnings actually collected into credit
+  advances the gallery. Paying back a negative balance cannot unlock a gem.
 - Side-button top-ups do not advance the gallery.
 
 The complete gem list is documented in

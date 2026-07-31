@@ -39,15 +39,6 @@ typedef struct {
     uint16_t weight;
 } fruit_track_cell_t;
 
-typedef enum {
-    FRUIT_JACKPOT_ALL_LIGHTS,
-    FRUIT_JACKPOT_BIG_THREE,
-    FRUIT_JACKPOT_SMALL_THREE,
-    FRUIT_JACKPOT_EIGHT_IMMORTALS,
-    FRUIT_JACKPOT_RANDOM,
-    FRUIT_JACKPOT_COUNT,
-} fruit_jackpot_t;
-
 typedef struct {
     uint16_t spin_start_interval_ms;
     uint16_t spin_fast_interval_ms;
@@ -58,13 +49,6 @@ typedef struct {
     uint16_t blue_luck_step_ms;
     uint8_t blue_luck_min_cells;
     uint8_t blue_luck_max_cells;
-    uint16_t jackpot_trigger_basis_points;
-    uint16_t jackpot_random_min_multiplier;
-    uint16_t jackpot_random_max_multiplier;
-    uint16_t jackpot_big_three_multiplier;
-    uint16_t jackpot_small_three_multiplier;
-    uint16_t jackpot_eight_immortals_multiplier;
-    uint16_t jackpot_all_lights_bonus_multiplier;
     uint8_t big_bang_free_spins;
     uint8_t big_bang_flash_steps;
     uint16_t big_bang_flash_interval_ms;
@@ -78,15 +62,14 @@ typedef struct {
     uint8_t motion_axis_dominance_percent;
     uint16_t motion_park_timeout_ms;
     uint16_t motion_stable_raw;
-    uint16_t motion_pickup_raw;
     uint8_t motion_park_samples;
     uint8_t motion_pickup_settle_samples;
 } fruit_game_tuning_t;
 
 extern const uint16_t fruit_base_payouts[FRUIT_CATEGORY_COUNT];
+extern const uint8_t fruit_bet_costs[FRUIT_CATEGORY_COUNT];
 extern const fruit_track_cell_t fruit_track[FRUIT_TRACK_COUNT];
 extern const uint8_t fruit_luck_multipliers[];
 extern const uint8_t fruit_luck_multiplier_count;
 extern const uint8_t fruit_gamble_percentages[FRUIT_GAMBLE_LEVEL_COUNT];
-extern const uint16_t fruit_jackpot_weights[FRUIT_JACKPOT_COUNT];
 extern const fruit_game_tuning_t fruit_game_tuning;

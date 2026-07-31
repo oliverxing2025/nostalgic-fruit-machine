@@ -201,10 +201,32 @@ static esp_err_t play_sound_sequence(fruit_sound_t sound)
 {
     static const note_t start[] = {{440, 55}, {660, 70}};
     static const note_t win[] = {{523, 90}, {659, 90}, {784, 100}, {1047, 180}};
+    /*
+     * Every stop result starts with the same short, bright "landing" ping.
+     * Higher payout tiers then add a progressively taller and faster flourish.
+     */
+    static const note_t win_low[] = {
+        {2093, 42}, {0, 18}, {1047, 58}, {1319, 90}
+    };
+    static const note_t win_medium[] = {
+        {2093, 42}, {0, 16}, {1047, 55}, {1319, 55}, {1661, 110}
+    };
+    static const note_t win_high[] = {
+        {2349, 42}, {0, 14}, {1175, 48}, {1568, 48},
+        {1976, 55}, {2637, 130}
+    };
+    static const note_t win_top[] = {
+        {2637, 45}, {0, 12},
+        {1319, 42}, {1661, 42}, {2093, 48}, {2637, 60},
+        {0, 22},
+        {2093, 42}, {2637, 42}, {3136, 170}
+    };
     static const note_t bonus[] = {
         {784, 70}, {988, 70}, {1175, 70}, {1568, 190}, {1175, 80}, {1568, 210}
     };
-    static const note_t lose[] = {{330, 90}, {247, 150}};
+    static const note_t lose[] = {
+        {2093, 42}, {0, 20}, {392, 65}, {330, 90}
+    };
     static const note_t jackpot[] = {
         {523, 65}, {659, 65}, {784, 65}, {1047, 130},
         {0, 45},
@@ -227,6 +249,18 @@ static esp_err_t play_sound_sequence(fruit_sound_t sound)
     } else if (sound == FRUIT_SOUND_WIN) {
         notes = win;
         length = sizeof(win) / sizeof(win[0]);
+    } else if (sound == FRUIT_SOUND_WIN_LOW) {
+        notes = win_low;
+        length = sizeof(win_low) / sizeof(win_low[0]);
+    } else if (sound == FRUIT_SOUND_WIN_MEDIUM) {
+        notes = win_medium;
+        length = sizeof(win_medium) / sizeof(win_medium[0]);
+    } else if (sound == FRUIT_SOUND_WIN_HIGH) {
+        notes = win_high;
+        length = sizeof(win_high) / sizeof(win_high[0]);
+    } else if (sound == FRUIT_SOUND_WIN_TOP) {
+        notes = win_top;
+        length = sizeof(win_top) / sizeof(win_top[0]);
     } else if (sound == FRUIT_SOUND_BONUS) {
         notes = bonus;
         length = sizeof(bonus) / sizeof(bonus[0]);

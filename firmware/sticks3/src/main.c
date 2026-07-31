@@ -75,6 +75,7 @@ typedef enum {
     EVENT_PREVIOUS,
     EVENT_GO,
     EVENT_ADD_CREDIT,
+    EVENT_RESET_CREDIT,
     EVENT_TOGGLE_GEMS,
     EVENT_MOTION_LEFT,
     EVENT_MOTION_RIGHT,
@@ -105,8 +106,8 @@ typedef enum {
     MSG_CLEARED,
     MSG_BIG_BANG,
     MSG_FREE_SPIN,
-    MSG_JACKPOT,
     MSG_CREDIT_ADDED,
+    MSG_CREDIT_RESET,
 } message_t;
 
 typedef struct {
@@ -121,6 +122,7 @@ typedef struct {
     uint8_t big_bang_armed;
     uint8_t balance_epoch;
     uint8_t bets[FRUIT_CATEGORY_COUNT];
+    uint8_t prepaid_bets[FRUIT_CATEGORY_COUNT];
 } saved_stats_t;
 
 #define SETTING_SOUND_ENABLED (1U << 0)
@@ -140,6 +142,7 @@ static saved_stats_t s_stats = {
     .big_bang_armed = 1,
 };
 static uint8_t s_bets[FRUIT_CATEGORY_COUNT];
+static uint8_t s_prepaid_bets[FRUIT_CATEGORY_COUNT];
 static uint8_t s_selected_control = CONTROL_GO;
 static uint8_t s_highlight;
 static game_state_t s_state = STATE_IDLE;
@@ -157,6 +160,8 @@ static int s_spin_target;
 static int64_t s_next_step_ms;
 static int s_bonus_steps;
 static int s_bonus_award;
+static int s_bonus_peak_multiplier;
+static bool s_round_settled;
 static uint8_t s_free_spins;
 static bool s_current_spin_free;
 static int64_t s_auto_spin_ms;
@@ -166,7 +171,6 @@ static uint8_t s_fire_phase;
 static uint8_t s_led_phase;
 static bool s_gem_gallery;
 static bool s_flash_red;
-static fruit_jackpot_t s_jackpot_kind;
 static volatile bool s_stats_dirty;
 static int64_t s_stats_flush_ms;
 
@@ -330,18 +334,42 @@ static void track_position(int index, int *x, int *y, int *w, int *h)
 static int total_bet(void)
 {
     int total = 0;
-    for (int i = 0; i < FRUIT_CATEGORY_COUNT; ++i) { total += s_bets[i]; }
+    for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) {
+        total+=s_bets[i]*fruit_bet_costs[i];
+    }
+    return total;
+}
+
+static int prepaid_bet_cost(void)
+{
+    int total=0;
+    for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) {
+        total+=s_prepaid_bets[i]*fruit_bet_costs[i];
+    }
     return total;
 }
 
 static int cell_award(int index)
 {
     const fruit_track_cell_t *cell = &fruit_track[index];
-    if (cell->symbol == FRUIT_SYMBOL_LUCK) { return total_bet() * 2; }
+    if (cell->symbol==FRUIT_SYMBOL_LUCK) return 0;
     int category = cell->symbol;
+    if (cell->multiplier==3) {
+        return s_bets[category]*3;
+    }
     int payout = cell->payout_override
         ? cell->payout_override : fruit_base_payouts[category];
-    return s_bets[category] * payout * cell->multiplier;
+    return s_bets[category]*payout;
+}
+
+static int cell_effective_multiplier(int index)
+{
+    const fruit_track_cell_t *cell=&fruit_track[index];
+    if (cell->luck!=FRUIT_LUCK_NONE) return 0;
+    if (cell->multiplier==3) return 3;
+    if (cell->symbol>=FRUIT_CATEGORY_COUNT) return 0;
+    return cell->payout_override
+        ?cell->payout_override:fruit_base_payouts[cell->symbol];
 }
 
 static int bonus_cell_award(int index)
@@ -883,14 +911,7 @@ static const char *message_text(char *buffer, size_t size)
     case MSG_CREDIT_ADDED:
         snprintf(buffer,size,"CREDIT +%d",FRUIT_CREDIT_TOPUP_UNIT);
         return buffer;
-    case MSG_JACKPOT:
-        switch (s_jackpot_kind) {
-        case FRUIT_JACKPOT_ALL_LIGHTS: return "ALL LIGHTS";
-        case FRUIT_JACKPOT_BIG_THREE: return "BIG THREE";
-        case FRUIT_JACKPOT_SMALL_THREE: return "SMALL THREE";
-        case FRUIT_JACKPOT_EIGHT_IMMORTALS: return "EIGHT HERO";
-        default: return "DRAGON WIN";
-        }
+    case MSG_CREDIT_RESET: return "CREDIT RESET";
     default: return "SELECT AND PLAY";
     }
 }
@@ -1155,6 +1176,8 @@ static esp_err_t write_stats_snapshot(const saved_stats_t *snapshot)
     nvs_set_u8(handle,"bbarmed",snapshot->big_bang_armed);
     nvs_set_u8(handle,"balancev",snapshot->balance_epoch);
     nvs_set_blob(handle,"bets",snapshot->bets,sizeof(snapshot->bets));
+    nvs_set_blob(handle,"prepaid",snapshot->prepaid_bets,
+                 sizeof(snapshot->prepaid_bets));
     err=nvs_commit(handle);
     nvs_close(handle);
     return err;
@@ -1184,6 +1207,8 @@ static void load_stats(void)
     nvs_get_u8(handle,"balancev",&s_stats.balance_epoch);
     size_t bets_size=sizeof(s_stats.bets);
     nvs_get_blob(handle,"bets",s_stats.bets,&bets_size);
+    size_t prepaid_size=sizeof(s_stats.prepaid_bets);
+    nvs_get_blob(handle,"prepaid",s_stats.prepaid_bets,&prepaid_size);
     nvs_close(handle);
     if (s_stats.balance_epoch<1) {
         s_stats.credit=0;
@@ -1192,6 +1217,22 @@ static void load_stats(void)
         s_stats_flush_ms=now_ms()+fruit_game_tuning.nvs_flush_delay_ms;
         ESP_LOGI(TAG,"credit reset migration applied balance_epoch=1");
     }
+    if (s_stats.balance_epoch<2) {
+        /*
+         * Earlier builds counted collected winnings even while CREDIT stayed
+         * negative. Remove that legacy progress only on affected balances so
+         * the new rule is visible immediately after this upgrade.
+         */
+        if (s_stats.credit<0 && s_stats.lifetime_winnings>0) {
+            ESP_LOGI(TAG,
+                     "negative-balance gem progress reset old_winnings=%lu",
+                     (unsigned long)s_stats.lifetime_winnings);
+            s_stats.lifetime_winnings=0;
+        }
+        s_stats.balance_epoch=2;
+        s_stats_dirty=true;
+        s_stats_flush_ms=now_ms()+fruit_game_tuning.nvs_flush_delay_ms;
+    }
     if (s_stats.credit<FRUIT_MIN_CREDIT ||
         s_stats.credit>FRUIT_MAX_CREDIT) {
         s_stats.credit=0;
@@ -1199,7 +1240,11 @@ static void load_stats(void)
     if (s_stats.high_credit<s_stats.credit) s_stats.high_credit=s_stats.credit;
     for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) {
         if (s_stats.bets[i]>FRUIT_MAX_BET_PER_SYMBOL) s_stats.bets[i]=0;
+        if (s_stats.prepaid_bets[i]>s_stats.bets[i]) {
+            s_stats.prepaid_bets[i]=0;
+        }
         s_bets[i]=s_stats.bets[i];
+        s_prepaid_bets[i]=s_stats.prepaid_bets[i];
     }
     s_free_spins=s_stats.free_spins;
     s_big_bang_armed=s_stats.big_bang_armed!=0;
@@ -1218,6 +1263,7 @@ static void credit_add(int amount)
 {
     int64_t value=(int64_t)s_stats.credit+amount;
     if (value>FRUIT_MAX_CREDIT) value=FRUIT_MAX_CREDIT;
+    if (value<FRUIT_MIN_CREDIT) value=FRUIT_MIN_CREDIT;
     s_stats.credit=(int)value;
     if (s_stats.credit>s_stats.high_credit) s_stats.high_credit=s_stats.credit;
 }
@@ -1225,9 +1271,24 @@ static void credit_add(int amount)
 static void credit_add_winnings(int amount)
 {
     uint8_t old_level=gem_level_from_winnings(s_stats.lifetime_winnings);
+    int old_credit=s_stats.credit;
     credit_add(amount);
     if (amount<=0) return;
-    uint64_t total=(uint64_t)s_stats.lifetime_winnings+(uint32_t)amount;
+    /*
+     * Paying back a negative balance is not gem progress.  Only the portion
+     * of a collected award that leaves CREDIT above zero may unlock gems.
+     */
+    int old_positive=old_credit>0?old_credit:0;
+    int new_positive=s_stats.credit>0?s_stats.credit:0;
+    int eligible_winnings=new_positive-old_positive;
+    if (eligible_winnings<=0) {
+        ESP_LOGI(TAG,
+                 "gem progress held credit_before=%d credit_after=%ld award=%d",
+                 old_credit,(long)s_stats.credit,amount);
+        return;
+    }
+    uint64_t total=(uint64_t)s_stats.lifetime_winnings+
+        (uint32_t)eligible_winnings;
     s_stats.lifetime_winnings=total>UINT32_MAX?UINT32_MAX:(uint32_t)total;
     uint8_t new_level=gem_level_from_winnings(s_stats.lifetime_winnings);
     if (new_level>old_level) {
@@ -1245,40 +1306,20 @@ static void add_credit_unit(void)
     mark_stats_dirty();
 }
 
-static fruit_jackpot_t random_jackpot(void)
+static void reset_credit(void)
 {
-    uint32_t total=0;
-    for (int i=0;i<FRUIT_JACKPOT_COUNT;++i) total+=fruit_jackpot_weights[i];
-    uint32_t draw=esp_random()%total;
-    for (int i=0;i<FRUIT_JACKPOT_COUNT;++i) {
-        if (draw<fruit_jackpot_weights[i]) return (fruit_jackpot_t)i;
-        draw-=fruit_jackpot_weights[i];
+    if (s_state!=STATE_IDLE) {
+        ESP_LOGW(TAG,"credit reset ignored state=%d",s_state);
+        return;
     }
-    return FRUIT_JACKPOT_RANDOM;
-}
-
-static int jackpot_award(fruit_jackpot_t kind)
-{
-    int stake=s_last_stake>0?s_last_stake:total_bet();
-    switch (kind) {
-    case FRUIT_JACKPOT_ALL_LIGHTS: {
-        int sum=0;
-        for (int i=0;i<FRUIT_TRACK_COUNT;++i) sum+=cell_award(i);
-        return sum+stake*fruit_game_tuning.jackpot_all_lights_bonus_multiplier;
-    }
-    case FRUIT_JACKPOT_BIG_THREE:
-        return stake*fruit_game_tuning.jackpot_big_three_multiplier;
-    case FRUIT_JACKPOT_SMALL_THREE:
-        return stake*fruit_game_tuning.jackpot_small_three_multiplier;
-    case FRUIT_JACKPOT_EIGHT_IMMORTALS:
-        return stake*fruit_game_tuning.jackpot_eight_immortals_multiplier;
-    default: {
-        uint16_t span=fruit_game_tuning.jackpot_random_max_multiplier-
-            fruit_game_tuning.jackpot_random_min_multiplier+1;
-        return stake*(fruit_game_tuning.jackpot_random_min_multiplier+
-                     esp_random()%span);
-    }
-    }
+    int old_credit=s_stats.credit;
+    s_stats.credit=0;
+    s_big_bang_armed=true;
+    s_stats.big_bang_armed=1;
+    s_message=MSG_CREDIT_RESET;
+    mark_stats_dirty();
+    play_sound(FRUIT_SOUND_START);
+    ESP_LOGI(TAG,"credit reset old=%d new=0 by side-four-click",old_credit);
 }
 
 static void update_gamble_amount(void)
@@ -1314,19 +1355,45 @@ static void enter_gamble_or_settle(int award)
         s_selected_control=CONTROL_SMALL;
         s_state=STATE_PENDING_WIN;
         s_message=MSG_GAMBLE;
-        play_sound(FRUIT_SOUND_WIN);
     } else {
         s_pending_win=0;
         s_state=STATE_IDLE;
         s_message=MSG_MISS;
-        play_sound(FRUIT_SOUND_LOSE);
         mark_stats_dirty();
     }
 }
 
+static void play_stop_result_sound(int award, int multiplier)
+{
+    if (award<=0) {
+        play_sound(FRUIT_SOUND_LOSE);
+    } else if (multiplier<=15) {
+        play_sound(FRUIT_SOUND_WIN_LOW);
+    } else if (multiplier<=30) {
+        play_sound(FRUIT_SOUND_WIN_MEDIUM);
+    } else if (multiplier<=60) {
+        play_sound(FRUIT_SOUND_WIN_HIGH);
+    } else {
+        play_sound(FRUIT_SOUND_WIN_TOP);
+    }
+}
+
+static void settle_round_once(int award, int multiplier)
+{
+    if (s_round_settled) {
+        ESP_LOGW(TAG,"duplicate round settlement ignored award=%d",award);
+        return;
+    }
+    s_round_settled=true;
+    ESP_LOGI(TAG,"settle once award=%d effective_multiplier=%d",
+             award,multiplier);
+    play_stop_result_sound(award,multiplier);
+    enter_gamble_or_settle(award);
+}
+
 static void finish_bonus_chain(void)
 {
-    enter_gamble_or_settle(s_bonus_award);
+    settle_round_once(s_bonus_award,s_bonus_peak_multiplier);
 }
 
 static void start_bonus_chain(void)
@@ -1335,10 +1402,12 @@ static void start_bonus_chain(void)
         fruit_game_tuning.blue_luck_min_cells+1;
     s_bonus_steps=fruit_game_tuning.blue_luck_min_cells+(esp_random()%span);
     s_bonus_award=0;
+    s_bonus_peak_multiplier=0;
     s_next_step_ms=now_ms()+fruit_game_tuning.blue_luck_step_ms;
     s_state=STATE_BONUS_CHAIN;
     s_message=MSG_LUCK_RIGHT;
     play_sound(FRUIT_SOUND_BONUS);
+    ESP_LOGI(TAG,"five-light start cells=%d",s_bonus_steps);
 }
 
 static void finish_spin(void)
@@ -1346,25 +1415,19 @@ static void finish_spin(void)
     const fruit_track_cell_t *cell=&fruit_track[s_highlight];
     ++s_stats.total_rounds;
     s_result_number=s_highlight;
-    if (cell->symbol==FRUIT_SYMBOL_LUCK &&
-        esp_random()%10000<fruit_game_tuning.jackpot_trigger_basis_points) {
-        s_jackpot_kind=random_jackpot();
-        int award=jackpot_award(s_jackpot_kind);
-        s_message=MSG_JACKPOT;
-        play_sound(FRUIT_SOUND_JACKPOT);
-        enter_gamble_or_settle(award);
-        return;
-    }
     if (cell->luck==FRUIT_LUCK_ORANGE) {
         int multiplier=fruit_luck_multipliers[
             esp_random()%fruit_luck_multiplier_count];
         int award=s_last_stake*multiplier;
         s_message=MSG_LUCK_LEFT;
-        enter_gamble_or_settle(award);
+        ESP_LOGI(TAG,"left LUCK stake=%d multiplier=%d award=%d",
+                 s_last_stake,multiplier,award);
+        settle_round_once(award,multiplier);
     } else if (cell->luck==FRUIT_LUCK_BLUE) {
         start_bonus_chain();
     } else {
-        enter_gamble_or_settle(cell_award(s_highlight));
+        settle_round_once(cell_award(s_highlight),
+                          cell_effective_multiplier(s_highlight));
     }
     ESP_LOGI(TAG,"result cell=%d symbol=%d x%d award=%d free=%d",
              s_highlight,cell->symbol,cell->multiplier,s_last_award,
@@ -1385,6 +1448,27 @@ static int weighted_target(void)
 
 static esp_err_t run_logic_self_test(void)
 {
+    static const uint16_t expected_payouts[FRUIT_CATEGORY_COUNT] = {
+        0, 40, 30, 20, 20, 15, 10, 5,
+    };
+    static const uint8_t expected_luck_multipliers[] = {
+        2, 3, 5, 8, 10, 20, 20,
+    };
+    for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) {
+        if (fruit_base_payouts[i]!=expected_payouts[i]) {
+            ESP_LOGE(TAG,"payout config invalid category=%d",i);
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+    if (fruit_luck_multiplier_count!=sizeof(expected_luck_multipliers) ||
+        memcmp(fruit_luck_multipliers,expected_luck_multipliers,
+               sizeof(expected_luck_multipliers))!=0 ||
+        fruit_game_tuning.blue_luck_min_cells!=5 ||
+        fruit_game_tuning.blue_luck_max_cells!=5) {
+        ESP_LOGE(TAG,"LUCK config invalid");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     size_t heap_before=heap_caps_get_free_size(MALLOC_CAP_8BIT);
     for (int round=0;round<1000;++round) {
         int target=weighted_target();
@@ -1405,6 +1489,10 @@ static esp_err_t run_logic_self_test(void)
             return ESP_FAIL;
         }
     }
+    int bar50_count=0;
+    int bar100_count=0;
+    int left_luck_count=0;
+    int right_luck_count=0;
     for (int i=0;i<FRUIT_TRACK_COUNT;++i) {
         const fruit_track_cell_t *cell=&fruit_track[i];
         if (cell->symbol>FRUIT_SYMBOL_LUCK || cell->weight==0 ||
@@ -1412,10 +1500,91 @@ static esp_err_t run_logic_self_test(void)
             ESP_LOGE(TAG,"track config invalid at cell=%d",i);
             return ESP_ERR_INVALID_ARG;
         }
+        if (cell->symbol==FRUIT_SYMBOL_BAR) {
+            if (cell->payout_override==50) ++bar50_count;
+            else if (cell->payout_override==100) ++bar100_count;
+            else {
+                ESP_LOGE(TAG,"BAR payout invalid at cell=%d",i);
+                return ESP_ERR_INVALID_ARG;
+            }
+        }
+        if (cell->luck==FRUIT_LUCK_ORANGE) ++left_luck_count;
+        if (cell->luck==FRUIT_LUCK_BLUE) ++right_luck_count;
     }
+    if (bar50_count!=1 || bar100_count!=1 ||
+        left_luck_count!=1 || right_luck_count!=1) {
+        ESP_LOGE(TAG,"special track config invalid");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t saved_bets[FRUIT_CATEGORY_COUNT];
+    memcpy(saved_bets,s_bets,sizeof(saved_bets));
+    memset(s_bets,1,sizeof(s_bets));
+    uint32_t total_weight=0;
+    uint32_t all_fixed_weighted_award=0;
+    uint32_t all_net_win_weight=0;
+    uint32_t left_luck_weight=0;
+    uint32_t luck_multiplier_sum=0;
+    int all_stake=total_bet();
+    for (int i=0;i<fruit_luck_multiplier_count;++i) {
+        luck_multiplier_sum+=fruit_luck_multipliers[i];
+    }
+    for (int i=0;i<FRUIT_TRACK_COUNT;++i) {
+        const fruit_track_cell_t *cell=&fruit_track[i];
+        total_weight+=cell->weight;
+        int expected=cell->symbol==FRUIT_SYMBOL_LUCK?0:
+            cell->multiplier==3?3:
+            cell->payout_override?cell->payout_override:
+            fruit_base_payouts[cell->symbol];
+        if (cell_award(i)!=expected) {
+            memcpy(s_bets,saved_bets,sizeof(s_bets));
+            ESP_LOGE(TAG,"award rule invalid at cell=%d",i);
+            return ESP_ERR_INVALID_ARG;
+        }
+        int balance_award=expected;
+        if (cell->luck==FRUIT_LUCK_BLUE) {
+            balance_award=0;
+            for (int step=1;step<=5;++step) {
+                balance_award+=bonus_cell_award(
+                    (i+step)%FRUIT_TRACK_COUNT);
+            }
+        } else if (cell->luck==FRUIT_LUCK_ORANGE) {
+            left_luck_weight+=cell->weight;
+            continue;
+        }
+        all_fixed_weighted_award+=cell->weight*balance_award;
+        if (balance_award>all_stake) all_net_win_weight+=cell->weight;
+    }
+    all_net_win_weight+=left_luck_weight;
+    uint64_t expected_award_numerator=
+        (uint64_t)all_fixed_weighted_award*fruit_luck_multiplier_count+
+        (uint64_t)left_luck_weight*all_stake*luck_multiplier_sum;
+    uint32_t expected_award_denominator=
+        total_weight*fruit_luck_multiplier_count;
+    uint32_t all_rtp_basis_points=(uint32_t)(
+        expected_award_numerator*10000/
+        (expected_award_denominator*all_stake));
+    uint32_t net_win_basis_points=
+        all_net_win_weight*10000/total_weight;
+    if (total_weight!=41 ||
+        all_rtp_basis_points<10500 || all_rtp_basis_points>11200 ||
+        net_win_basis_points<2500 || net_win_basis_points>3500) {
+        memcpy(s_bets,saved_bets,sizeof(s_bets));
+        ESP_LOGE(TAG,
+                 "balance invalid weight=%lu rtp_bp=%lu net_win_bp=%lu",
+                 (unsigned long)total_weight,
+                 (unsigned long)all_rtp_basis_points,
+                 (unsigned long)net_win_basis_points);
+        return ESP_ERR_INVALID_ARG;
+    }
+    memcpy(s_bets,saved_bets,sizeof(s_bets));
     size_t heap_after=heap_caps_get_free_size(MALLOC_CAP_8BIT);
-    ESP_LOGI(TAG,"1000-round logic self-test PASS heap_delta=%d",
-             (int)heap_after-(int)heap_before);
+    ESP_LOGI(TAG,
+             "1000-round logic self-test PASS heap_delta=%d weight=%lu rtp_bp=%lu net_win_bp=%lu",
+             (int)heap_after-(int)heap_before,
+             (unsigned long)total_weight,
+             (unsigned long)all_rtp_basis_points,
+             (unsigned long)net_win_basis_points);
     return ESP_OK;
 }
 
@@ -1431,13 +1600,15 @@ static void start_spin(bool free_spin)
         s_message=MSG_NO_BET; render(); return;
     }
     if (!free_spin) {
-        int64_t next_credit=(int64_t)s_stats.credit-stake;
-        s_stats.credit=next_credit<FRUIT_MIN_CREDIT
-            ?FRUIT_MIN_CREDIT:(int32_t)next_credit;
+        int remaining_cost=stake-prepaid_bet_cost();
+        if (remaining_cost>0) credit_add(-remaining_cost);
+        memset(s_prepaid_bets,0,sizeof(s_prepaid_bets));
     }
     else if (s_free_spins>0) --s_free_spins;
     s_current_spin_free=free_spin;
+    s_round_settled=false;
     s_last_stake=stake;
+    s_last_award=0;
     s_pending_win=0; s_result_number=0;
     s_spin_target=weighted_target();
     int fixed_steps=fruit_game_tuning.spin_accel_steps+
@@ -1528,8 +1699,14 @@ static void add_bet(int category)
 {
     if (category<0 || category>=FRUIT_CATEGORY_COUNT) return;
     if (s_bets[category]>=FRUIT_MAX_BET_PER_SYMBOL) return;
-    ++s_bets[category]; s_message=MSG_READY;
+    ++s_bets[category];
+    ++s_prepaid_bets[category];
+    credit_add(-fruit_bet_costs[category]);
+    s_message=MSG_READY;
     mark_stats_dirty();
+    ESP_LOGI(TAG,"bet add category=%d cost=%u units=%u credit=%ld",
+             category,(unsigned)fruit_bet_costs[category],
+             (unsigned)s_bets[category],(long)s_stats.credit);
 }
 
 static void add_all(void)
@@ -1537,14 +1714,23 @@ static void add_all(void)
     for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) {
         if (s_bets[i]>=FRUIT_MAX_BET_PER_SYMBOL) return;
     }
-    for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) ++s_bets[i];
+    int cost=0;
+    for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) {
+        ++s_bets[i];
+        ++s_prepaid_bets[i];
+        cost+=fruit_bet_costs[i];
+    }
+    credit_add(-cost);
     s_message=MSG_READY;
     mark_stats_dirty();
+    ESP_LOGI(TAG,"bet add all cost=%d credit=%ld",cost,
+             (long)s_stats.credit);
 }
 
 static void double_bets(void)
 {
     int doubled_total=0;
+    int added_cost=0;
     for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) {
         int doubled=s_bets[i]*2;
         if (doubled>FRUIT_MAX_BET_PER_SYMBOL) {
@@ -1558,18 +1744,43 @@ static void double_bets(void)
     }
     for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) {
         int doubled=s_bets[i]*2;
-        s_bets[i]=doubled>FRUIT_MAX_BET_PER_SYMBOL
-            ? FRUIT_MAX_BET_PER_SYMBOL : doubled;
+        int capped=doubled>FRUIT_MAX_BET_PER_SYMBOL
+            ?FRUIT_MAX_BET_PER_SYMBOL:doubled;
+        int added=capped-s_bets[i];
+        s_bets[i]=capped;
+        s_prepaid_bets[i]+=added;
+        added_cost+=added*fruit_bet_costs[i];
     }
+    credit_add(-added_cost);
     s_message=MSG_READY;
     mark_stats_dirty();
+    ESP_LOGI(TAG,"bet double added_cost=%d total_cost=%d credit=%ld",
+             added_cost,total_bet(),(long)s_stats.credit);
 }
 
 static void clear_all(void)
 {
+    int refund=prepaid_bet_cost();
+    credit_add(refund);
     memset(s_bets,0,sizeof(s_bets));
+    memset(s_prepaid_bets,0,sizeof(s_prepaid_bets));
     s_message=MSG_CLEARED;
     mark_stats_dirty();
+    ESP_LOGI(TAG,"bet clear all refund=%d credit=%ld",
+             refund,(long)s_stats.credit);
+}
+
+static void clear_bet(int category)
+{
+    if (category<0 || category>=FRUIT_CATEGORY_COUNT) return;
+    int refund=s_prepaid_bets[category]*fruit_bet_costs[category];
+    credit_add(refund);
+    s_bets[category]=0;
+    s_prepaid_bets[category]=0;
+    s_message=MSG_CLEARED;
+    mark_stats_dirty();
+    ESP_LOGI(TAG,"bet clear category=%d refund=%d credit=%ld",
+             category,refund,(long)s_stats.credit);
 }
 
 static void adjust_gamble_level(int delta)
@@ -1617,8 +1828,7 @@ static void activate_selected(bool long_press)
     }
     if (control<FRUIT_CATEGORY_COUNT) {
         if (long_press) {
-            s_bets[control]=0; s_message=MSG_CLEARED;
-            mark_stats_dirty();
+            clear_bet(control);
         } else add_bet(control);
     } else if (control==CONTROL_ALL) {
         if (long_press) {
@@ -1678,8 +1888,18 @@ static void update_game(void)
     } else if (s_state==STATE_BONUS_CHAIN && now>=s_next_step_ms) {
         s_highlight=(s_highlight+1)%FRUIT_TRACK_COUNT;
         ++s_led_phase;
-        s_bonus_award+=bonus_cell_award(s_highlight);
+        int step_award=bonus_cell_award(s_highlight);
+        int step_multiplier=cell_effective_multiplier(s_highlight);
+        s_bonus_award+=step_award;
+        if (step_award>0 && step_multiplier>s_bonus_peak_multiplier) {
+            s_bonus_peak_multiplier=step_multiplier;
+        }
         --s_bonus_steps;
+        ESP_LOGI(TAG,
+                 "five-light cell=%u symbol=%u award=%d total=%d remaining=%d",
+                 (unsigned)s_highlight,
+                 (unsigned)fruit_track[s_highlight].symbol,
+                 step_award,s_bonus_award,s_bonus_steps);
         s_message=MSG_LUCK_RIGHT;
         if (s_bonus_steps<=0) finish_bonus_chain();
         else s_next_step_ms=now+fruit_game_tuning.blue_luck_step_ms;
@@ -1798,6 +2018,8 @@ static void handle_event(game_event_t event)
         else start_spin(false);
     } else if (event==EVENT_ADD_CREDIT) {
         add_credit_unit();
+    } else if (event==EVENT_RESET_CREDIT) {
+        reset_credit();
     } else if (event==EVENT_ACTIVATE || event==EVENT_ACTIVATE_LONG) {
         activate_selected(event==EVENT_ACTIVATE_LONG);
     } else if (s_state==STATE_PENDING_WIN &&
@@ -1853,9 +2075,15 @@ static void side_single_cb(void *h,void *u)
 {
     (void)h;(void)u;ESP_LOGI(TAG,"side single");queue_event(EVENT_ADD_CREDIT);
 }
-static void side_repeat_cb(void *h,void *u)
+static void side_double_cb(void *h,void *u)
 {
-    (void)h;(void)u;ESP_LOGI(TAG,"side double second-down");queue_event(EVENT_PREVIOUS);
+    (void)h;(void)u;ESP_LOGI(TAG,"side double");queue_event(EVENT_PREVIOUS);
+}
+static void side_four_click_cb(void *h,void *u)
+{
+    (void)h;(void)u;
+    ESP_LOGI(TAG,"side four click");
+    queue_event(EVENT_RESET_CREDIT);
 }
 static void side_long_cb(void *h,void *u)
 {
@@ -1881,8 +2109,12 @@ static esp_err_t init_buttons(void)
     ESP_RETURN_ON_ERROR(iot_button_new_gpio_device(&config,&sg,&side),TAG,"side");
     ESP_RETURN_ON_ERROR(iot_button_register_cb(side,BUTTON_SINGLE_CLICK,NULL,
         side_single_cb,NULL),TAG,"side single");
-    ESP_RETURN_ON_ERROR(iot_button_register_cb(side,BUTTON_PRESS_REPEAT,NULL,
-        side_repeat_cb,NULL),TAG,"side repeat");
+    ESP_RETURN_ON_ERROR(iot_button_register_cb(side,BUTTON_DOUBLE_CLICK,NULL,
+        side_double_cb,NULL),TAG,"side double");
+    button_event_args_t four_click_args={.multiple_clicks={.clicks=4}};
+    ESP_RETURN_ON_ERROR(iot_button_register_cb(
+        side,BUTTON_MULTIPLE_CLICK,&four_click_args,
+        side_four_click_cb,NULL),TAG,"side four click");
     ESP_RETURN_ON_ERROR(iot_button_register_cb(side,BUTTON_LONG_PRESS_START,&args,
         side_long_cb,NULL),TAG,"side long");
     return ESP_OK;
@@ -2021,6 +2253,8 @@ static void persistence_task(void *arg)
         snapshot.free_spins=s_free_spins;
         snapshot.big_bang_armed=s_big_bang_armed?1:0;
         memcpy(snapshot.bets,s_bets,sizeof(snapshot.bets));
+        memcpy(snapshot.prepaid_bets,s_prepaid_bets,
+               sizeof(snapshot.prepaid_bets));
         s_stats_dirty=false;
         s_stats_flush_ms=0;
         lvgl_unlock();
@@ -2042,15 +2276,13 @@ static void motion_task(void *arg)
     bool armed=true;
     uint8_t neutral_samples=0;
     uint8_t candidate_samples=0;
+    uint8_t drift_samples=0;
     game_event_t candidate_event=EVENT_ACTIVATE;
     int64_t cooldown_until=0;
     int64_t disarmed_since=0;
     bool have_previous_sample=false;
     int16_t previous_x=0,previous_y=0,previous_z=0;
-    bool parked=false;
-    bool pickup_seen=false;
     uint8_t stable_samples=0;
-    int16_t parked_x=0,parked_y=0,parked_z=0;
 
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(fruit_game_tuning.motion_sample_interval_ms));
@@ -2077,6 +2309,10 @@ static void motion_task(void *arg)
         int32_t abs_y=motion_y<0?-motion_y:motion_y;
         int32_t abs_z=motion_z<0?-motion_z:motion_z;
         int64_t now=now_ms();
+        bool sample_stable=
+            step_x<fruit_game_tuning.motion_stable_raw &&
+            step_y<fruit_game_tuning.motion_stable_raw &&
+            step_z<fruit_game_tuning.motion_stable_raw;
 
         if (!armed) {
             if (abs_y<fruit_game_tuning.motion_release_raw &&
@@ -2087,65 +2323,70 @@ static void motion_task(void *arg)
                 neutral_samples>=fruit_game_tuning.motion_rearm_samples) {
                 armed=true;
                 neutral_samples=0;
+                candidate_samples=0;
+                drift_samples=0;
                 baseline_y=y;
                 baseline_z=z;
-                parked=false;
-                pickup_seen=false;
                 stable_samples=0;
                 ESP_LOGI(TAG,"motion rearmed after physical center");
                 continue;
             }
 
-            bool stable=
-                step_x<fruit_game_tuning.motion_stable_raw &&
-                step_y<fruit_game_tuning.motion_stable_raw &&
-                step_z<fruit_game_tuning.motion_stable_raw;
-            if (!parked &&
-                now-disarmed_since>=fruit_game_tuning.motion_park_timeout_ms) {
-                if (stable) {
+            int64_t disarmed_ms=now-disarmed_since;
+            if (disarmed_ms>=fruit_game_tuning.motion_park_timeout_ms) {
+                if (sample_stable) {
                     if (stable_samples<UINT8_MAX) ++stable_samples;
                 } else stable_samples=0;
-                if (stable_samples>=fruit_game_tuning.motion_park_samples) {
-                    parked=true;
-                    pickup_seen=false;
-                    stable_samples=0;
-                    parked_x=x;
-                    parked_y=y;
-                    parked_z=z;
-                    ESP_LOGI(TAG,"motion parked; waiting for pickup");
-                }
-            } else if (parked && !pickup_seen) {
-                int32_t pickup_x=(int32_t)x-parked_x;
-                int32_t pickup_y=(int32_t)y-parked_y;
-                int32_t pickup_z=(int32_t)z-parked_z;
-                if (pickup_x<0) pickup_x=-pickup_x;
-                if (pickup_y<0) pickup_y=-pickup_y;
-                if (pickup_z<0) pickup_z=-pickup_z;
-                if (pickup_x>=fruit_game_tuning.motion_pickup_raw ||
-                    pickup_y>=fruit_game_tuning.motion_pickup_raw ||
-                    pickup_z>=fruit_game_tuning.motion_pickup_raw) {
-                    pickup_seen=true;
-                    stable_samples=0;
-                    ESP_LOGI(TAG,"motion pickup detected; settling");
-                }
-            } else if (parked && pickup_seen) {
-                if (stable) {
-                    if (stable_samples<UINT8_MAX) ++stable_samples;
-                } else stable_samples=0;
-                if (stable_samples>=
-                    fruit_game_tuning.motion_pickup_settle_samples) {
+                bool stable_recovery=
+                    stable_samples>=fruit_game_tuning.motion_park_samples;
+                bool hard_recovery=
+                    disarmed_ms>=
+                    (int64_t)fruit_game_tuning.motion_park_timeout_ms*4;
+                if (stable_recovery || hard_recovery) {
                     baseline_y=y;
                     baseline_z=z;
                     armed=true;
                     neutral_samples=0;
-                    parked=false;
-                    pickup_seen=false;
+                    candidate_samples=0;
+                    drift_samples=0;
                     stable_samples=0;
-                    ESP_LOGI(TAG,"motion rearmed after pickup settle");
+                    ESP_LOGI(TAG,
+                             "motion auto-rearmed reason=%s "
+                             "delta_y=%ld delta_z=%ld disarmed_ms=%lld",
+                             stable_recovery?"stable":"timeout",
+                             (long)motion_y,(long)motion_z,
+                             (long long)disarmed_ms);
                 }
             }
             continue;
         }
+
+        /*
+         * A slow change in the user's neutral holding angle can leave the
+         * baseline frozen in the release/trigger hysteresis band.  Distinguish
+         * that from a deliberate gesture by requiring a long run of tiny
+         * sample-to-sample changes before adopting the new stable pose.
+         * Normal direction gestures cross the threshold long before this
+         * recovery window expires.
+         */
+        if (abs_y>=fruit_game_tuning.motion_release_raw ||
+            abs_z>=fruit_game_tuning.motion_release_raw) {
+            if (sample_stable) {
+                if (drift_samples<UINT8_MAX) ++drift_samples;
+            } else drift_samples=0;
+            if (drift_samples>=
+                fruit_game_tuning.motion_pickup_settle_samples) {
+                ESP_LOGI(TAG,
+                         "motion baseline recovered after stable drift "
+                         "delta_y=%ld delta_z=%ld",
+                         (long)motion_y,(long)motion_z);
+                baseline_y=y;
+                baseline_z=z;
+                candidate_samples=0;
+                drift_samples=0;
+                continue;
+            }
+        } else drift_samples=0;
 
         if (abs_y<fruit_game_tuning.motion_trigger_raw &&
             abs_z<fruit_game_tuning.motion_trigger_raw) {
@@ -2195,9 +2436,8 @@ static void motion_task(void *arg)
         armed=false;
         neutral_samples=0;
         candidate_samples=0;
+        drift_samples=0;
         disarmed_since=now;
-        parked=false;
-        pickup_seen=false;
         stable_samples=0;
         cooldown_until=now+fruit_game_tuning.motion_cooldown_ms;
     }
@@ -2205,7 +2445,8 @@ static void motion_task(void *arg)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG,"boot VibeStick Fruit Machine 0.6.0 gem-gallery");
+    ESP_LOGI(TAG,
+             "boot VibeStick Fruit Machine 0.6.1 gem-gallery bet-costs");
     esp_err_t result=nvs_flash_init();
     if (result==ESP_ERR_NVS_NO_FREE_PAGES ||
         result==ESP_ERR_NVS_NEW_VERSION_FOUND) {
