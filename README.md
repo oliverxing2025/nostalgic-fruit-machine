@@ -11,7 +11,7 @@
     <a href="#game-rules">Game rules</a> ·
     <a href="#gem-collection">Gems</a> ·
     <a href="#build">Build</a> ·
-    <a href="README.zh-CN.md">Chinese</a>
+    <a href="README.zh-CN.md">简体中文</a>
   </p>
   <p>
     <img alt="Hardware: M5Stack StickS3" src="https://img.shields.io/badge/hardware-M5Stack%20StickS3-EA1D2C">
