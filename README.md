@@ -1,5 +1,5 @@
 <div align="center">
-  <h1>怀旧水果机</h1>
+  <h1>Nostalgic Fruit Machine</h1>
   <p><strong>Nostalgic Fruit Machine for M5Stack StickS3</strong></p>
   <p>
     A pocket-sized retro arcade with motion controls,<br>
@@ -11,7 +11,7 @@
     <a href="#game-rules">Game rules</a> ·
     <a href="#gem-collection">Gems</a> ·
     <a href="#build">Build</a> ·
-    <a href="README.zh-CN.md">简体中文</a>
+    <a href="README.zh-CN.md">Chinese</a>
   </p>
   <p>
     <img alt="Hardware: M5Stack StickS3" src="https://img.shields.io/badge/hardware-M5Stack%20StickS3-EA1D2C">
