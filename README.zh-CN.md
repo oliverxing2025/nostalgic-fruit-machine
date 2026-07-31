@@ -21,7 +21,7 @@
     <img alt="模式：完全离线" src="https://img.shields.io/badge/mode-%E5%AE%8C%E5%85%A8%E7%A6%BB%E7%BA%BF-2E8B57">
   </p>
   <br>
-  <img src="assets/screenshots/fruit-machine-neon-showcase.png" alt="霓虹街机氛围中的 M5Stack StickS3 怀旧水果机" width="900">
+  <img src="assets/screenshots/fruit-machine-new-icons-neon-showcase.jpg" alt="采用新水果、皇冠、钻石、99、SUP 与 WOW 图标的 M5Stack StickS3 怀旧水果机" width="900">
 </div>
 
 ## 项目概览
@@ -42,6 +42,10 @@
 
 > [!NOTE]
 > 宣传图片为产品效果图，个别视觉细节可能与当前实机屏幕和固件版本略有差异。
+
+<div align="center">
+  <img src="assets/screenshots/fruit-machine-new-icons-product.jpg" alt="M5Stack StickS3 怀旧水果机新图标界面的正面产品图" width="520">
+</div>
 
 ## 设备体验
 
@@ -113,6 +117,7 @@
 | 操作 | 功能 |
 | --- | --- |
 | 单击 | 增加5个虚拟 CREDIT |
+| 连按4次，每次间隔不超过约0.9秒 | 将当前 CREDIT 重置为0 |
 | 双击 | 选择上一个按钮 |
 | 长按约0.9秒 | 打开或关闭30颗宝石收藏 |
 

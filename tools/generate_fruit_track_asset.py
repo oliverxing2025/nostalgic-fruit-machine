@@ -16,7 +16,10 @@ REFERENCE_SIZE = 1024
 # top-to-bottom, bottom right-to-left, then left bottom-to-top.
 SOURCE_BOXES = [
     (10, 10, 155, 150),
-    (155, 10, 295, 150),
+    # Give the crown extra source-space on every side. Its artwork reaches the
+    # original cell's top and right edge, which otherwise loses a pixel after
+    # 19x19 downsampling.
+    (145, 5, 305, 150),
     (295, 10, 437, 150),
     (437, 10, 581, 150),
     (581, 10, 720, 150),

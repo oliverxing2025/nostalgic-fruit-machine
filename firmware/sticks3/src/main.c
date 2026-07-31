@@ -391,6 +391,36 @@ static void blit_track_tile(int tile_index, int x, int y)
     }
 }
 
+static void blit_bet_tile_without_top_divider(int tile_index, int x, int y)
+{
+    uint16_t *pixels=(uint16_t *)s_canvas_buffer;
+    const uint16_t *tile=&fruit_track_image_rgb565[
+        tile_index*FRUIT_TRACK_IMAGE_CELL*FRUIT_TRACK_IMAGE_CELL];
+    const int cropped_height=FRUIT_TRACK_IMAGE_CELL-3;
+    for (int row=0;row<FRUIT_TRACK_IMAGE_CELL;++row) {
+        int source_row=3+row*cropped_height/FRUIT_TRACK_IMAGE_CELL;
+        memcpy(&pixels[(y+row)*SCREEN_W+x],
+               &tile[source_row*FRUIT_TRACK_IMAGE_CELL],
+               FRUIT_TRACK_IMAGE_CELL*sizeof(uint16_t));
+    }
+}
+
+static void blit_bet_tile_inset(int tile_index, int x, int y)
+{
+    uint16_t *pixels=(uint16_t *)s_canvas_buffer;
+    const uint16_t *tile=&fruit_track_image_rgb565[
+        tile_index*FRUIT_TRACK_IMAGE_CELL*FRUIT_TRACK_IMAGE_CELL];
+    const int inset_size=FRUIT_TRACK_IMAGE_CELL-2;
+    for (int row=0;row<inset_size;++row) {
+        int source_row=row*FRUIT_TRACK_IMAGE_CELL/inset_size;
+        for (int column=0;column<inset_size;++column) {
+            int source_column=column*FRUIT_TRACK_IMAGE_CELL/inset_size;
+            pixels[(y+row)*SCREEN_W+x+column]=
+                tile[source_row*FRUIT_TRACK_IMAGE_CELL+source_column];
+        }
+    }
+}
+
 static void light_track_tile(int x, int y, int w, int h)
 {
     uint16_t *pixels=(uint16_t *)s_canvas_buffer;
@@ -449,8 +479,8 @@ static void draw_track(void)
             light_track_tile(x,y,w,h);
         }
         if (fruit_track[i].symbol==FRUIT_SYMBOL_BAR) {
-            fill_rect(x+1,y+2,w-2,7,0xffe5af);
-            centered_text("BAR",x+w/2,y+2,1,0x1c1008);
+            fill_rect(x+1,y+2,w-2,7,0x65166f);
+            centered_text("SUP",x+w/2,y+2,1,0xffffff);
             fill_rect(x+1,y+10,w-2,7,0xffe5af);
             char payout[8];
             snprintf(payout,sizeof(payout),"%d",fruit_track[i].payout_override);
@@ -1114,10 +1144,29 @@ static void draw_bets(void)
         bool selected=s_selected_control==i;
         fill_rect(x,y,w,22,selected?0x542b0d:0x122218);
         rect(x,y,w,22,0x3d633f);
-        blit_track_tile(symbol_tiles[i],x+1,y+2);
+        if (i==FRUIT_SYMBOL_SEVEN || i==FRUIT_SYMBOL_STAR) {
+            /*
+             * These two cells need their source divider removed: it flattens
+             * the top of 99 and appears as a stray line above the diamonds.
+             */
+            blit_bet_tile_without_top_divider(symbol_tiles[i],x+1,y+2);
+        } else if (i==FRUIT_SYMBOL_MELON || i>=FRUIT_SYMBOL_BELL) {
+            /*
+             * Use the same complete 19x19 button area and alignment as 99 and
+             * the diamonds. Do not rescale or offset these detailed symbols:
+             * doing so drops edge samples and hides crowns, leaves and fruit.
+             */
+            blit_track_tile(symbol_tiles[i],x+1,y+2);
+        } else {
+            /*
+             * Keep the complete SUP artwork inset from the button rim.
+             */
+            blit_bet_tile_inset(symbol_tiles[i],x+2,y+3);
+        }
         if (i==FRUIT_SYMBOL_BAR) {
-            fill_rect(x+2,y+4,17,15,0xffe5af);
-            centered_text("BAR",x+10,y+8,1,0x1c1008);
+            /* The bet button is a plain SUP mark, without track-cell trim. */
+            fill_rect(x+1,y+2,19,19,0x65166f);
+            centered_text("SUP",x+10,y+8,1,0xffffff);
         }
         draw_bet_number(s_bets[i],x+26,y+9,
                         s_bets[i]?0xffffff:0x687468);
@@ -2079,11 +2128,21 @@ static void side_double_cb(void *h,void *u)
 {
     (void)h;(void)u;ESP_LOGI(TAG,"side double");queue_event(EVENT_PREVIOUS);
 }
-static void side_four_click_cb(void *h,void *u)
+static void side_release_cb(void *h,void *u)
 {
     (void)h;(void)u;
-    ESP_LOGI(TAG,"side four click");
-    queue_event(EVENT_RESET_CREDIT);
+    static uint64_t last_release_ms;
+    static uint8_t click_count;
+    uint64_t current_ms=now_ms();
+    if (current_ms-last_release_ms>900) click_count=0;
+    last_release_ms=current_ms;
+    ++click_count;
+    ESP_LOGI(TAG,"side reset click count=%u",click_count);
+    if (click_count>=4) {
+        click_count=0;
+        ESP_LOGI(TAG,"side four click");
+        queue_event(EVENT_RESET_CREDIT);
+    }
 }
 static void side_long_cb(void *h,void *u)
 {
@@ -2111,10 +2170,8 @@ static esp_err_t init_buttons(void)
         side_single_cb,NULL),TAG,"side single");
     ESP_RETURN_ON_ERROR(iot_button_register_cb(side,BUTTON_DOUBLE_CLICK,NULL,
         side_double_cb,NULL),TAG,"side double");
-    button_event_args_t four_click_args={.multiple_clicks={.clicks=4}};
     ESP_RETURN_ON_ERROR(iot_button_register_cb(
-        side,BUTTON_MULTIPLE_CLICK,&four_click_args,
-        side_four_click_cb,NULL),TAG,"side four click");
+        side,BUTTON_PRESS_UP,NULL,side_release_cb,NULL),TAG,"side release");
     ESP_RETURN_ON_ERROR(iot_button_register_cb(side,BUTTON_LONG_PRESS_START,&args,
         side_long_cb,NULL),TAG,"side long");
     return ESP_OK;

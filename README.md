@@ -21,7 +21,7 @@
     <img alt="Mode: Offline" src="https://img.shields.io/badge/mode-offline-2E8B57">
   </p>
   <br>
-  <img src="assets/screenshots/fruit-machine-neon-showcase.png" alt="Nostalgic Fruit Machine running on an M5Stack StickS3 in a neon arcade" width="900">
+  <img src="assets/screenshots/fruit-machine-new-icons-neon-showcase.jpg" alt="Nostalgic Fruit Machine with its new fruit, crown, diamond, 99, SUP, and WOW artwork in a neon arcade" width="900">
 </div>
 
 ## Overview
@@ -45,6 +45,10 @@ fruit-themed center scene—without a phone, account, or network connection.
 > [!NOTE]
 > The promotional images are product renders. Minor visual details may differ
 > from the current physical display and firmware revision.
+
+<div align="center">
+  <img src="assets/screenshots/fruit-machine-new-icons-product.jpg" alt="Front product view of the Nostalgic Fruit Machine interface on M5Stack StickS3" width="520">
+</div>
 
 ## Device experience
 
@@ -125,7 +129,7 @@ or gem gallery is active.
 | Gesture | Action |
 | --- | --- |
 | Single press | Add 5 virtual credits |
-| Four quick presses | Reset current credit to 0 |
+| Four presses, no more than about 0.9 s apart | Reset current credit to 0 |
 | Double press | Select the previous control |
 | Long press, about 0.9 s | Open or close the 30-gem collection |
 
