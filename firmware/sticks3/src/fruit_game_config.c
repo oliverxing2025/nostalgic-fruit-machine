@@ -1,7 +1,7 @@
 #include "fruit_game_config.h"
 
 const uint16_t fruit_base_payouts[FRUIT_CATEGORY_COUNT] = {
-    0, 40, 30, 20, 20, 15, 10, 5,
+    0, 40, 30, 20, 25, 15, 10, 5,
 };
 
 /*
@@ -16,37 +16,39 @@ const uint8_t fruit_bet_costs[FRUIT_CATEGORY_COUNT] = {
 /*
  * Clockwise from the upper-left. The visible board remains unchanged, while
  * weights favor useful mid-tier outcomes and keep the one-unit all-symbol
- * return near 106% with a roughly 29% net-win rate. BAR cells use explicit
- * 50x/100x values; multiplier=3 marks the visible X3 cells.
+ * visible symbol variety is kept broad by reducing repeated low-tier results.
+ * BAR cells use explicit 50x/100x values; multiplier=3 triples the symbol's
+ * normal payout on visible X3 cells.
  */
 const fruit_track_cell_t fruit_track[FRUIT_TRACK_COUNT] = {
-    {FRUIT_SYMBOL_ORANGE, 1, 0,   FRUIT_LUCK_NONE,  1},
-    {FRUIT_SYMBOL_BELL,   1, 0,   FRUIT_LUCK_NONE,  2},
-    {FRUIT_SYMBOL_BAR,    1, 50,  FRUIT_LUCK_NONE,  2},
-    {FRUIT_SYMBOL_BAR,    1, 100, FRUIT_LUCK_NONE,  2},
-    {FRUIT_SYMBOL_APPLE,  1, 0,   FRUIT_LUCK_NONE,  1},
+    {FRUIT_SYMBOL_ORANGE, 1, 0,   FRUIT_LUCK_NONE,  2},
+    {FRUIT_SYMBOL_BELL,   1, 0,   FRUIT_LUCK_NONE,  3},
+    {FRUIT_SYMBOL_BAR,    1, 50,  FRUIT_LUCK_NONE,  3},
+    {FRUIT_SYMBOL_BAR,    1, 100, FRUIT_LUCK_NONE,  1},
+    {FRUIT_SYMBOL_APPLE,  1, 0,   FRUIT_LUCK_NONE,  3},
     {FRUIT_SYMBOL_APPLE,  3, 0,   FRUIT_LUCK_NONE,  1},
-    {FRUIT_SYMBOL_CYAN,   1, 0,   FRUIT_LUCK_NONE,  2},
-    {FRUIT_SYMBOL_MELON,  1, 0,   FRUIT_LUCK_NONE,  4},
+    {FRUIT_SYMBOL_CYAN,   1, 0,   FRUIT_LUCK_NONE,  3},
+    {FRUIT_SYMBOL_MELON,  1, 0,   FRUIT_LUCK_NONE,  5},
     {FRUIT_SYMBOL_MELON,  3, 0,   FRUIT_LUCK_NONE,  1},
-    {FRUIT_SYMBOL_LUCK,   1, 0,   FRUIT_LUCK_BLUE,  2},
-    {FRUIT_SYMBOL_APPLE,  1, 0,   FRUIT_LUCK_NONE,  1},
+    {FRUIT_SYMBOL_LUCK,   1, 0,   FRUIT_LUCK_BLUE,  1},
+    {FRUIT_SYMBOL_APPLE,  1, 0,   FRUIT_LUCK_NONE,  3},
     {FRUIT_SYMBOL_ORANGE, 3, 0,   FRUIT_LUCK_NONE,  1},
-    {FRUIT_SYMBOL_ORANGE, 1, 0,   FRUIT_LUCK_NONE,  1},
-    {FRUIT_SYMBOL_BELL,   1, 0,   FRUIT_LUCK_NONE,  2},
-    {FRUIT_SYMBOL_SEVEN,  3, 0,   FRUIT_LUCK_NONE,  1},
-    {FRUIT_SYMBOL_SEVEN,  1, 0,   FRUIT_LUCK_NONE,  4},
-    {FRUIT_SYMBOL_APPLE,  1, 0,   FRUIT_LUCK_NONE,  1},
+    {FRUIT_SYMBOL_ORANGE, 1, 0,   FRUIT_LUCK_NONE,  2},
+    {FRUIT_SYMBOL_BELL,   1, 0,   FRUIT_LUCK_NONE,  3},
+    {FRUIT_SYMBOL_SEVEN,  3, 0,   FRUIT_LUCK_NONE,  2},
+    {FRUIT_SYMBOL_SEVEN,  1, 0,   FRUIT_LUCK_NONE,  6},
+    {FRUIT_SYMBOL_APPLE,  1, 0,   FRUIT_LUCK_NONE,  3},
     {FRUIT_SYMBOL_CYAN,   3, 0,   FRUIT_LUCK_NONE,  1},
-    {FRUIT_SYMBOL_CYAN,   1, 0,   FRUIT_LUCK_NONE,  2},
-    {FRUIT_SYMBOL_STAR,   1, 0,   FRUIT_LUCK_NONE,  4},
-    {FRUIT_SYMBOL_STAR,   3, 0,   FRUIT_LUCK_NONE,  1},
-    {FRUIT_SYMBOL_LUCK,   1, 0,   FRUIT_LUCK_ORANGE,2},
-    {FRUIT_SYMBOL_APPLE,  1, 0,   FRUIT_LUCK_NONE,  1},
-    {FRUIT_SYMBOL_BELL,   3, 0,   FRUIT_LUCK_NONE,  1},
+    {FRUIT_SYMBOL_CYAN,   1, 0,   FRUIT_LUCK_NONE,  3},
+    {FRUIT_SYMBOL_STAR,   1, 0,   FRUIT_LUCK_NONE,  5},
+    {FRUIT_SYMBOL_STAR,   3, 0,   FRUIT_LUCK_NONE,  2},
+    {FRUIT_SYMBOL_LUCK,   1, 0,   FRUIT_LUCK_ORANGE,1},
+    {FRUIT_SYMBOL_APPLE,  1, 0,   FRUIT_LUCK_NONE,  3},
+    {FRUIT_SYMBOL_BELL,   3, 0,   FRUIT_LUCK_NONE,  2},
 };
 
-const uint8_t fruit_luck_multipliers[] = {2, 3, 5, 8, 10, 20, 20};
+const uint8_t fruit_luck_multipliers[] = {5, 10, 15, 20, 30, 40, 60};
+const uint8_t fruit_luck_multiplier_weights[] = {40, 25, 15, 10, 5, 3, 2};
 const uint8_t fruit_luck_multiplier_count =
     sizeof(fruit_luck_multipliers) / sizeof(fruit_luck_multipliers[0]);
 
@@ -65,7 +67,7 @@ const fruit_game_tuning_t fruit_game_tuning = {
     .spin_accel_steps = 12,
     .spin_steady_laps = 2,
     .spin_decel_min_steps = 24,
-    .blue_luck_step_ms = 220,
+    .blue_luck_step_ms = 650,
     .blue_luck_min_cells = 5,
     .blue_luck_max_cells = 5,
     .big_bang_free_spins = 3,
