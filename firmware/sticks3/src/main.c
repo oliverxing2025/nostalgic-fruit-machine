@@ -103,6 +103,7 @@ typedef enum {
     MSG_GAMBLE,
     MSG_GAMBLE_WIN,
     MSG_GAMBLE_LOSE,
+    MSG_BET_DECREASED,
     MSG_CLEARED,
     MSG_BIG_BANG,
     MSG_FREE_SPIN,
@@ -116,11 +117,11 @@ typedef struct {
     uint32_t total_rounds;
     uint32_t winning_rounds;
     int32_t highest_single_win;
-    uint32_t lifetime_winnings;
     uint32_t settings_flags;
     uint8_t free_spins;
     uint8_t big_bang_armed;
     uint8_t balance_epoch;
+    uint8_t gem_level;
     uint8_t bets[FRUIT_CATEGORY_COUNT];
     uint8_t prepaid_bets[FRUIT_CATEGORY_COUNT];
 } saved_stats_t;
@@ -140,6 +141,7 @@ static saved_stats_t s_stats = {
     .high_credit = FRUIT_STARTING_CREDIT,
     .settings_flags = SETTING_SOUND_ENABLED,
     .big_bang_armed = 1,
+    .gem_level = 1,
 };
 static uint8_t s_bets[FRUIT_CATEGORY_COUNT];
 static uint8_t s_prepaid_bets[FRUIT_CATEGORY_COUNT];
@@ -718,13 +720,20 @@ static uint32_t gem_unlock_threshold(uint8_t level)
     return 50U*(level-1U)*level;
 }
 
-static uint8_t gem_level_from_winnings(uint32_t winnings)
+static uint8_t gem_level_from_credit(int32_t credit)
 {
+    uint32_t value=credit>0?(uint32_t)credit:0;
     uint8_t level=1;
-    while (level<30 && winnings>=gem_unlock_threshold(level+1)) {
+    while (level<30 && value>=gem_unlock_threshold(level+1)) {
         ++level;
     }
     return level;
+}
+
+static uint8_t gem_level_after_credit(uint8_t activated_level, int32_t credit)
+{
+    uint8_t reached_level=gem_level_from_credit(credit);
+    return reached_level>activated_level?reached_level:activated_level;
 }
 
 static uint32_t gem_brighten(uint32_t color)
@@ -753,7 +762,7 @@ static bool gem_mask_contains(const uint16_t *mask, int row, int column)
 
 static void draw_header_gem(void)
 {
-    uint8_t level=gem_level_from_winnings(s_stats.lifetime_winnings);
+    uint8_t level=s_stats.gem_level;
     const uint16_t *mask=s_gem_masks[(level-1)%6];
     uint32_t raw_color=s_gem_colors[level-1];
     bool animated=s_state==STATE_SPIN || s_state==STATE_BONUS_CHAIN;
@@ -847,8 +856,7 @@ static void draw_gallery_number(uint32_t value, int center_x, int y,
 static void draw_gem_gallery(void)
 {
     fill_rect(0,0,SCREEN_W,SCREEN_H,0x090705);
-    uint8_t unlocked_level=
-        gem_level_from_winnings(s_stats.lifetime_winnings);
+    uint8_t unlocked_level=s_stats.gem_level;
     for (int index=0;index<30;++index) {
         int column=index%5;
         int row=index/5;
@@ -935,6 +943,7 @@ static const char *message_text(char *buffer, size_t size)
     case MSG_GAMBLE: return "PENDING WIN";
     case MSG_GAMBLE_WIN: snprintf(buffer,size,"N%02d X2",s_result_number); return buffer;
     case MSG_GAMBLE_LOSE: snprintf(buffer,size,"N%02d LOST",s_result_number); return buffer;
+    case MSG_BET_DECREASED: return "BET -1";
     case MSG_CLEARED: return "BET CLEARED";
     case MSG_BIG_BANG: return "BIG BANG";
     case MSG_FREE_SPIN: snprintf(buffer,size,"FREE %d",s_free_spins); return buffer;
@@ -1219,11 +1228,13 @@ static esp_err_t write_stats_snapshot(const saved_stats_t *snapshot)
     nvs_set_u32(handle,"rounds",snapshot->total_rounds);
     nvs_set_u32(handle,"wins",snapshot->winning_rounds);
     nvs_set_i32(handle,"bestwin",snapshot->highest_single_win);
-    nvs_set_u32(handle,"gemwon",snapshot->lifetime_winnings);
+    /* Gem activation follows current CREDIT; discard the legacy accumulator. */
+    nvs_erase_key(handle,"gemwon");
     nvs_set_u32(handle,"settings",snapshot->settings_flags);
     nvs_set_u8(handle,"free",snapshot->free_spins);
     nvs_set_u8(handle,"bbarmed",snapshot->big_bang_armed);
     nvs_set_u8(handle,"balancev",snapshot->balance_epoch);
+    nvs_set_u8(handle,"gemlvl",snapshot->gem_level);
     nvs_set_blob(handle,"bets",snapshot->bets,sizeof(snapshot->bets));
     nvs_set_blob(handle,"prepaid",snapshot->prepaid_bets,
                  sizeof(snapshot->prepaid_bets));
@@ -1249,11 +1260,11 @@ static void load_stats(void)
     nvs_get_u32(handle,"rounds",&s_stats.total_rounds);
     nvs_get_u32(handle,"wins",&s_stats.winning_rounds);
     nvs_get_i32(handle,"bestwin",&s_stats.highest_single_win);
-    nvs_get_u32(handle,"gemwon",&s_stats.lifetime_winnings);
     nvs_get_u32(handle,"settings",&s_stats.settings_flags);
     nvs_get_u8(handle,"free",&s_stats.free_spins);
     nvs_get_u8(handle,"bbarmed",&s_stats.big_bang_armed);
     nvs_get_u8(handle,"balancev",&s_stats.balance_epoch);
+    bool has_gem_level=nvs_get_u8(handle,"gemlvl",&s_stats.gem_level)==ESP_OK;
     size_t bets_size=sizeof(s_stats.bets);
     nvs_get_blob(handle,"bets",s_stats.bets,&bets_size);
     size_t prepaid_size=sizeof(s_stats.prepaid_bets);
@@ -1266,25 +1277,26 @@ static void load_stats(void)
         s_stats_flush_ms=now_ms()+fruit_game_tuning.nvs_flush_delay_ms;
         ESP_LOGI(TAG,"credit reset migration applied balance_epoch=1");
     }
-    if (s_stats.balance_epoch<2) {
-        /*
-         * Earlier builds counted collected winnings even while CREDIT stayed
-         * negative. Remove that legacy progress only on affected balances so
-         * the new rule is visible immediately after this upgrade.
-         */
-        if (s_stats.credit<0 && s_stats.lifetime_winnings>0) {
-            ESP_LOGI(TAG,
-                     "negative-balance gem progress reset old_winnings=%lu",
-                     (unsigned long)s_stats.lifetime_winnings);
-            s_stats.lifetime_winnings=0;
-        }
-        s_stats.balance_epoch=2;
-        s_stats_dirty=true;
-        s_stats_flush_ms=now_ms()+fruit_game_tuning.nvs_flush_delay_ms;
-    }
     if (s_stats.credit<FRUIT_MIN_CREDIT ||
         s_stats.credit>FRUIT_MAX_CREDIT) {
         s_stats.credit=0;
+    }
+    if (s_stats.high_credit<0 || s_stats.high_credit>FRUIT_MAX_CREDIT) {
+        s_stats.high_credit=s_stats.credit>0?s_stats.credit:0;
+    }
+    if (!has_gem_level || s_stats.balance_epoch<4 ||
+        s_stats.gem_level<1 || s_stats.gem_level>30) {
+        /*
+         * A permanently lit gem records a threshold that the live CREDIT
+         * balance reached at least once. The saved high-water balance is the
+         * compatible source for that state; it is not a sum of spent credit.
+         */
+        s_stats.gem_level=gem_level_from_credit(s_stats.high_credit);
+        s_stats.balance_epoch=4;
+        s_stats_dirty=true;
+        s_stats_flush_ms=now_ms()+fruit_game_tuning.nvs_flush_delay_ms;
+        ESP_LOGI(TAG,"gem activation migrated level=%u high_credit=%ld",
+                 s_stats.gem_level,(long)s_stats.high_credit);
     }
     if (s_stats.high_credit<s_stats.credit) s_stats.high_credit=s_stats.credit;
     for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) {
@@ -1315,36 +1327,23 @@ static void credit_add(int amount)
     if (value<FRUIT_MIN_CREDIT) value=FRUIT_MIN_CREDIT;
     s_stats.credit=(int)value;
     if (s_stats.credit>s_stats.high_credit) s_stats.high_credit=s_stats.credit;
+    uint8_t reached_level=gem_level_after_credit(s_stats.gem_level,
+                                                  s_stats.credit);
+    if (reached_level>s_stats.gem_level) {
+        s_stats.gem_level=reached_level;
+        ESP_LOGI(TAG,"gem activated level=%u name=%s credit=%ld",
+                 reached_level,s_gem_names[reached_level-1],
+                 (long)s_stats.credit);
+    }
 }
 
 static void credit_add_winnings(int amount)
 {
-    uint8_t old_level=gem_level_from_winnings(s_stats.lifetime_winnings);
     int old_credit=s_stats.credit;
     credit_add(amount);
     if (amount<=0) return;
-    /*
-     * Paying back a negative balance is not gem progress.  Only the portion
-     * of a collected award that leaves CREDIT above zero may unlock gems.
-     */
-    int old_positive=old_credit>0?old_credit:0;
-    int new_positive=s_stats.credit>0?s_stats.credit:0;
-    int eligible_winnings=new_positive-old_positive;
-    if (eligible_winnings<=0) {
-        ESP_LOGI(TAG,
-                 "gem progress held credit_before=%d credit_after=%ld award=%d",
-                 old_credit,(long)s_stats.credit,amount);
-        return;
-    }
-    uint64_t total=(uint64_t)s_stats.lifetime_winnings+
-        (uint32_t)eligible_winnings;
-    s_stats.lifetime_winnings=total>UINT32_MAX?UINT32_MAX:(uint32_t)total;
-    uint8_t new_level=gem_level_from_winnings(s_stats.lifetime_winnings);
-    if (new_level>old_level) {
-        ESP_LOGI(TAG,"gem unlocked level=%u name=%s winnings=%lu",
-                 new_level,s_gem_names[new_level-1],
-                 (unsigned long)s_stats.lifetime_winnings);
-    }
+    ESP_LOGI(TAG,"credit award=%d before=%d after=%ld gem=%u",
+             amount,old_credit,(long)s_stats.credit,s_stats.gem_level);
 }
 
 static void add_credit_unit(void)
@@ -1503,6 +1502,14 @@ static esp_err_t run_logic_self_test(void)
     static const uint8_t expected_luck_multipliers[] = {
         2, 3, 5, 8, 10, 20, 20,
     };
+    if (gem_level_from_credit(99)!=1 ||
+        gem_level_from_credit(100)!=2 ||
+        gem_level_from_credit(43500)!=30 ||
+        gem_level_after_credit(3,0)!=3 ||
+        gem_level_after_credit(3,-500)!=3) {
+        ESP_LOGE(TAG,"current-credit gem rule invalid");
+        return ESP_ERR_INVALID_ARG;
+    }
     for (int i=0;i<FRUIT_CATEGORY_COUNT;++i) {
         if (fruit_base_payouts[i]!=expected_payouts[i]) {
             ESP_LOGE(TAG,"payout config invalid category=%d",i);
@@ -1819,17 +1826,25 @@ static void clear_all(void)
              refund,(long)s_stats.credit);
 }
 
-static void clear_bet(int category)
+static void decrease_bet(int category)
 {
     if (category<0 || category>=FRUIT_CATEGORY_COUNT) return;
-    int refund=s_prepaid_bets[category]*fruit_bet_costs[category];
+    if (s_bets[category]==0) {
+        s_message=MSG_NO_BET;
+        return;
+    }
+    int refund=0;
+    if (s_prepaid_bets[category]>0) {
+        --s_prepaid_bets[category];
+        refund=fruit_bet_costs[category];
+    }
     credit_add(refund);
-    s_bets[category]=0;
-    s_prepaid_bets[category]=0;
-    s_message=MSG_CLEARED;
+    --s_bets[category];
+    s_message=MSG_BET_DECREASED;
     mark_stats_dirty();
-    ESP_LOGI(TAG,"bet clear category=%d refund=%d credit=%ld",
-             category,refund,(long)s_stats.credit);
+    ESP_LOGI(TAG,"bet decrease category=%d refund=%d units=%u credit=%ld",
+             category,refund,(unsigned)s_bets[category],
+             (long)s_stats.credit);
 }
 
 static void adjust_gamble_level(int delta)
@@ -1877,7 +1892,7 @@ static void activate_selected(bool long_press)
     }
     if (control<FRUIT_CATEGORY_COUNT) {
         if (long_press) {
-            clear_bet(control);
+            decrease_bet(control);
         } else add_bet(control);
     } else if (control==CONTROL_ALL) {
         if (long_press) {
@@ -2048,10 +2063,10 @@ static void handle_event(game_event_t event)
         if (s_state!=STATE_SPIN && s_state!=STATE_BONUS_CHAIN &&
             s_state!=STATE_BIG_BANG) {
             s_gem_gallery=!s_gem_gallery;
-            ESP_LOGI(TAG,"gem gallery %s level=%u winnings=%lu",
+            ESP_LOGI(TAG,"gem gallery %s level=%u credit=%ld",
                      s_gem_gallery?"open":"closed",
-                     gem_level_from_winnings(s_stats.lifetime_winnings),
-                     (unsigned long)s_stats.lifetime_winnings);
+                     s_stats.gem_level,
+                     (long)s_stats.credit);
             play_sound(FRUIT_SOUND_TICK);
         }
     } else if (s_gem_gallery) {
@@ -2503,7 +2518,7 @@ static void motion_task(void *arg)
 void app_main(void)
 {
     ESP_LOGI(TAG,
-             "boot VibeStick Fruit Machine 0.6.1 gem-gallery bet-costs");
+             "boot VibeStick Fruit Machine 0.6.3 bet-decrease");
     esp_err_t result=nvs_flash_init();
     if (result==ESP_ERR_NVS_NO_FREE_PAGES ||
         result==ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -2529,10 +2544,9 @@ void app_main(void)
     }
     if (s_free_spins>0 && total_bet()>0) s_auto_spin_ms=now_ms()+1000;
     ESP_LOGI(TAG,
-        "ready credit=%ld high=%ld rounds=%lu wins=%lu best=%ld gem=%u gem_won=%lu controls=motion-four-way side-short-topup side-long-gallery front-activate",
+        "ready credit=%ld high=%ld rounds=%lu wins=%lu best=%ld gem=%u gem_credit=%ld controls=motion-four-way side-short-topup side-long-gallery front-activate",
         (long)s_stats.credit,(long)s_stats.high_credit,
         (unsigned long)s_stats.total_rounds,(unsigned long)s_stats.winning_rounds,
         (long)s_stats.highest_single_win,
-        gem_level_from_winnings(s_stats.lifetime_winnings),
-        (unsigned long)s_stats.lifetime_winnings);
+        s_stats.gem_level,(long)s_stats.credit);
 }
