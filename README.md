@@ -17,7 +17,7 @@
     <img alt="Hardware: M5Stack StickS3" src="https://img.shields.io/badge/hardware-M5Stack%20StickS3-EA1D2C">
     <img alt="Display: 135 by 240" src="https://img.shields.io/badge/display-135%C3%97240-111111">
     <img alt="ESP-IDF: 5.5" src="https://img.shields.io/badge/ESP--IDF-5.5-E7352C">
-    <img alt="Version: 0.6.1" src="https://img.shields.io/badge/version-0.6.1-F3A712">
+    <img alt="Version: 0.6.3" src="https://img.shields.io/badge/version-0.6.3-F3A712">
     <img alt="Mode: Offline" src="https://img.shields.io/badge/mode-offline-2E8B57">
   </p>
   <br>
@@ -36,7 +36,7 @@ fruit-themed center scene—without a phone, account, or network connection.
 | **01** | Retro running-light board | Accelerates, completes steady laps, decelerates, and stops precisely on a preselected result with synchronized light and sound. |
 | **02** | Motion-first control | Navigate the three control rows by tilting left, right, forward, or backward, with re-centering and pickup recovery. |
 | **03** | Layered risk and reward | Eight bets, X3 cells, two LUCK modes, small/big risk play, rare jackpots, Big Bang, and free spins. |
-| **04** | Long-term collection | Unlock 30 individually colored gemstones using cumulative winnings actually collected into credit. |
+| **04** | Long-term collection | Permanently light 30 colored gemstones when current credit first reaches each threshold. |
 
 > Entertainment only. All credits are virtual. The firmware has no recharge,
 > withdrawal, cash-out, advertising, account, analytics, or network-gambling
@@ -62,7 +62,7 @@ fruit-themed center scene—without a phone, account, or network connection.
 - Automatic pickup recovery after the device has been left resting.
 - Small/big risk mode with selectable 25%, 50%, 75%, or 100% participation.
 - Orange LUCK, blue LUCK, Big Bang, and free spins.
-- 30 unlockable gemstones driven only by cumulative collected winnings.
+- 30 permanently unlockable gemstones driven by the highest threshold current credit has reached.
 - Persistent credit, bets, statistics, sound state, game state, and gem
   progress through NVS.
 - Allocation-free runtime UI and a 1,000-round logic self-test on every boot.
@@ -77,7 +77,7 @@ fruit-themed center scene—without a phone, account, or network connection.
 | Audio | ES8311 codec and onboard speaker |
 | Framework | ESP-IDF 5.5.x |
 | UI | LVGL |
-| Current firmware | 0.6.1 |
+| Current firmware | 0.6.3 |
 
 Directional selection uses accelerometer samples only. Gyroscope angle
 integration is not used.
@@ -122,7 +122,7 @@ or gem gallery is active.
 | --- | --- |
 | Single press | Activate the selected control |
 | Double press | Start `GO`; collect a pending win |
-| Long press, about 0.9 s | Clear the selected symbol bet; on `ALL+1`, clear all bets |
+| Long press, about 0.9 s | Decrease the selected symbol bet by one; on `ALL+1`, clear all bets |
 
 ### Side button
 
@@ -140,7 +140,7 @@ to prevent accidental betting.
 
 | Control | Purpose |
 | --- | --- |
-| Eight symbol tiles | Add one bet to the selected symbol; maximum `99` each |
+| Eight symbol tiles | Blue-button short press adds one; long press subtracts one; range `00`–`99` |
 | `ALL+1` | Add one bet to all eight symbols |
 | `2X` | Double every non-zero symbol bet, capped at `99` |
 | `CLR` | Clear every bet |
@@ -161,7 +161,7 @@ risk percentage.
 - Clicking a symbol deducts its configured per-unit cost. A retained bet is
   charged when the next spin starts; prepaid clicks are not charged twice.
 - Play may continue below zero; credit is bounded at `-99,999`.
-- Top-ups never count toward gem progress.
+- Gem activation uses current credit only; previously spent credit is not accumulated.
 
 ### Board and payouts
 
@@ -221,13 +221,15 @@ Long-press the side button to open a full-screen 5 × 6 gallery of 30 gems.
   <img src="assets/screenshots/gem-collection-level-up-showcase.png" alt="The 30-gem collection gallery on an M5Stack StickS3" width="900">
 </div>
 
-- Gem 1 is available at 0 cumulative collected winnings.
+- Gem 1 is available at 0 credit.
 - Gem level `n` unlocks at `50 × (n - 1) × n`.
 - Gem 2 unlocks at 100; gem 30 unlocks at 43,500.
 - Locked gems are grayscale; unlocked gems use their individual colors.
-- Only the positive-balance portion of winnings actually collected into credit
-  advances the gallery. Paying back a negative balance cannot unlock a gem.
-- Side-button top-ups do not advance the gallery.
+- A new gem activates only when current credit first reaches its threshold;
+  previously spent credit is not accumulated.
+- Once activated, a gem remains lit permanently. Spending, resetting, or going
+  below zero does not dim it again.
+- Side-button top-ups count because they increase the current credit balance.
 
 The complete gem list is documented in
 [docs/GEM_COLLECTION.zh-CN.md](docs/GEM_COLLECTION.zh-CN.md).
@@ -241,7 +243,7 @@ NVS stores:
 - total rounds, winning rounds, and highest single win;
 - pending Big Bang/free-spin state;
 - sound settings;
-- cumulative collected winnings and gem level.
+- permanently activated gem level.
 
 Writes are dirty-marked and delayed, then handled by a low-priority persistence
 task rather than inside animation timing.
@@ -309,7 +311,7 @@ Every boot runs a 1,000-round allocation-free logic test covering:
 A healthy startup includes:
 
 ```text
-boot VibeStick Fruit Machine 0.6.1 gem-gallery bet-costs
+boot VibeStick Fruit Machine 0.6.3 bet-decrease
 1000-round logic self-test PASS heap_delta=0
 display portrait 135x240
 ```
