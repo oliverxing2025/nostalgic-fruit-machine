@@ -7,7 +7,7 @@
   </p>
   <p>
     <a href="#overview">Overview</a> ·
-    <a href="#whats-new-in-v063">v0.6.3</a> ·
+    <a href="#whats-new-in-v070">v0.7.0</a> ·
     <a href="#complete-controls">Controls</a> ·
     <a href="#game-rules">Game rules</a> ·
     <a href="#gem-collection">Gems</a> ·
@@ -18,35 +18,36 @@
     <img alt="Hardware: M5Stack StickS3" src="https://img.shields.io/badge/hardware-M5Stack%20StickS3-EA1D2C">
     <img alt="Display: 135 by 240" src="https://img.shields.io/badge/display-135%C3%97240-111111">
     <img alt="ESP-IDF: 5.5" src="https://img.shields.io/badge/ESP--IDF-5.5-E7352C">
-    <img alt="Version: 0.6.3" src="https://img.shields.io/badge/version-0.6.3-F3A712">
+    <img alt="Version: 0.7.0" src="https://img.shields.io/badge/version-0.7.0-F3A712">
     <img alt="Mode: Offline" src="https://img.shields.io/badge/mode-offline-2E8B57">
   </p>
   <br>
   <img src="assets/screenshots/fruit-machine-new-icons-neon-showcase.jpg" alt="Nostalgic Fruit Machine with its new fruit, crown, diamond, 99, SUP, and WOW artwork in a neon arcade" width="900">
 </div>
 
-## What's new in v0.6.3
+## What's new in v0.7.0
 
 Released on August 1, 2026. Download the firmware and view the complete notes
-on the [v0.6.3 release page](https://github.com/oliverxing2025/nostalgic-fruit-machine/releases/tag/v0.6.3).
+on the [v0.7.0 release page](https://github.com/oliverxing2025/nostalgic-fruit-machine/releases/tag/v0.7.0).
 
-- **Current-credit gems:** a new gem activates when the live `CREDIT` balance
-  first reaches its threshold. Previously spent credit is not accumulated.
-- **Permanent collection:** once activated, a gem stays lit after spending,
-  resetting, or entering a negative balance.
-- **Safe migration:** existing saved data discards the old cumulative-winnings
-  counter and restores the permanent gem level from the highest credit balance
-  previously reached.
-- **One-step bet reduction:** short-press the front blue button to add one to
-  the selected symbol; long-press for about 0.9 seconds to subtract one. A
-  prepaid unit is refunded automatically.
+- **Correct X3 awards:** an X3 cell now applies three times the symbol's full
+  payout. Crown pays 25×/75× and 99 pays 40×/120×.
+- **Balanced WOW events:** left WOW uses weighted 5×–60× total-stake awards;
+  right WOW reveals five independent fruit-only results with live accumulation.
+- **Four-lamp protection:** four consecutive paid spins without a net profit
+  arm a visible lucky spin that stops on the nearest profitable result.
+- **Clear settlement:** results show `BET / WIN / NET`; pending risk play shows
+  `WIN / RISK / SAFE` while selecting 25%, 50%, 75%, or 100%.
+- **Refined pacing and balance:** the protected all-symbol return is about
+  104.47%, with a long-run net-win share of about 38.38%.
+- **Live battery status:** the header now shows battery level and charging state.
 
 ### Upgrade paths
 
 | Download | Flash offset | Use it when | Saved data |
 | --- | ---: | --- | --- |
-| `Nostalgic-Fruit-Machine-v0.6.3-app.bin` | `0x20000` | Updating a device whose identity and compatible partition layout have already been verified | Preserves NVS credit, statistics, bets, and gem state |
-| `Nostalgic-Fruit-Machine-v0.6.3-full.bin` | `0x0` | Clean standalone installation, or intentionally replacing the existing firmware layout | Resets NVS and all saved game data |
+| `Nostalgic-Fruit-Machine-v0.7.0-app.bin` | `0x20000` | Updating a device whose identity and compatible partition layout have already been verified | Preserves NVS credit, statistics, bets, and gem state |
+| `Nostalgic-Fruit-Machine-v0.7.0-full.bin` | `0x0` | Clean standalone installation, or intentionally replacing the existing firmware layout | Resets NVS and all saved game data |
 
 > [!WARNING]
 > Verify the physical device identity, partition layout, image, and offset
@@ -86,6 +87,12 @@ fruit-themed center scene—without a phone, account, or network connection.
   deceleration, synchronized audio, and illuminated active artwork.
 - Eight independent symbol bets from `00` to `99`, plus `ALL+1`, `2X`, `CLR`,
   small, big, and `GO` controls.
+- Extended live battery gauge beside `CREDIT`, using the same orange-red color
+  as the credit digits and showing a lightning bolt while charging.
+- A post-result `BET / WIN / NET` readout makes each round's stake, award, and
+  actual profit or loss explicit.
+- Four lucky lamps on the center panel's top inner rail light after consecutive
+  non-profit paid spins; when all four are lit, the next paid spin is profitable.
 - Four-direction selection using the StickS3's BMI270 accelerometer.
 - Physical re-centering lock: one tilt triggers one move; return the device to
   its neutral pose before the next move.
@@ -107,7 +114,7 @@ fruit-themed center scene—without a phone, account, or network connection.
 | Audio | ES8311 codec and onboard speaker |
 | Framework | ESP-IDF 5.5.x |
 | UI | LVGL |
-| Current firmware | 0.6.3 |
+| Current firmware | 0.7.0 |
 
 Directional selection uses accelerometer samples only. Gyroscope angle
 integration is not used.
@@ -211,23 +218,37 @@ The 24 positions begin at the upper-left and proceed clockwise:
 | 77 | 8 | 40× |
 | Star | 6 | 30× |
 | Watermelon | 4 | 20× |
-| Bell | 5 | 20× |
+| Bell | 5 | 25× |
 | Cyan fruit | 3 | 15× |
 | Orange | 2 | 10× |
 | Apple | 1 | 5× |
 
-An `X3` cell pays bet units ×3 and does not also apply the normal symbol
-multiplier. The result is chosen with `esp_random()` using per-cell weights
+An `X3` cell pays three times the symbol's normal payout multiplier: for
+example, 99 X3 pays 120× and Crown X3 pays 75×. The result is chosen with
+`esp_random()` using per-cell weights
 before animation; the state machine then calculates the exact number of steps
 required to stop on it after at least two steady laps. The balanced weights
-target about 106.36% theoretical return and a 29.27% net-win rate for one unit
-on every symbol, before optional small/big gambling.
+produce about 104.64% base theoretical return for one unit on every symbol.
+With the four-lamp protection below, the long-run theoretical return is about
+104.5% and the long-run net-win share rises from about 33.33% to 38.38%, before
+optional small/big gambling.
+
+### Four-lamp lucky protection
+
+- A paid spin without a net profit lights one lamp on the top inner rail.
+- After four consecutive non-profit results, the next paid spin stops on the
+  nearest ordinary result whose award exceeds the round's total stake.
+- Any ordinary, left-WOW, or right-WOW net win resets the lamps early.
+- Free spins neither add nor clear lamps. Resetting credit clears all four.
 
 ### Pending win: small, big, or collect
 
 After an ordinary paid win:
 
 1. Choose how much of the pending win participates: 25%, 50%, 75%, or 100%.
+   The initial level is 100%; tilt left or activate `-` to reduce it, and tilt
+   right or activate `+` to increase it. The center shows `WIN`, `RISK`, and
+   the protected `SAFE` amount live.
 2. Choose `1-6` for small or `8-13` for big.
 3. A number from 1 to 13 is drawn.
 4. A correct guess doubles the participating amount.
@@ -237,9 +258,13 @@ After an ordinary paid win:
 
 ### Special events
 
-- **Orange LUCK:** awards total bet × `2/3/5/8/10/20/20`.
-- **Blue LUCK:** resolves a chain of exactly 5 consecutive cells. A LUCK cell inside
-  the chain pays zero and does not recursively start another LUCK event.
+- **Left WOW:** awards total bet × one of `5/10/15/20/30/40/60`, with
+  respective probabilities of `40%/25%/15%/10%/5%/3%/2%`.
+- **Right WOW:** performs 5 independent weighted board draws, so the same symbol
+  can repeat. Every result is settled and accumulated separately; X3 triples
+  its normal symbol payout. WOW results are redrawn so all 5 results are valid
+  fruit symbols. Each reveal remains visible for 0.65 seconds with both the
+  step award and running total shown on screen.
 - **Big Bang:** when credit reaches total maximum bet × 400, the center scene
   flashes and grants three automatic free spins while retaining the last bet.
 
@@ -341,7 +366,7 @@ Every boot runs a 1,000-round allocation-free logic test covering:
 A healthy startup includes:
 
 ```text
-boot VibeStick Fruit Machine 0.6.3 bet-decrease
+boot VibeStick Fruit Machine 0.7.0 lucky-protection
 1000-round logic self-test PASS heap_delta=0
 display portrait 135x240
 ```

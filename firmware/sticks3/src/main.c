@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +51,7 @@
 #define LVGL_DRAW_BUF_LINES 20
 #define LVGL_TICK_PERIOD_MS 10
 #define GAME_TIMER_MS 20
+#define BATTERY_POLL_MS 5000
 
 #define PIN_BUTTON_FRONT 11
 #define PIN_BUTTON_SIDE 12
@@ -162,10 +164,14 @@ static int s_spin_target;
 static int64_t s_next_step_ms;
 static int s_bonus_steps;
 static int s_bonus_award;
+static int s_bonus_step_award;
 static int s_bonus_peak_multiplier;
 static bool s_round_settled;
 static uint8_t s_free_spins;
 static bool s_current_spin_free;
+static uint8_t s_lucky_loss_count;
+static bool s_lucky_spin_active;
+static int s_last_net;
 static int64_t s_auto_spin_ms;
 static bool s_big_bang_armed = true;
 static uint8_t s_flash_steps;
@@ -175,6 +181,12 @@ static bool s_gem_gallery;
 static bool s_flash_red;
 static volatile bool s_stats_dirty;
 static int64_t s_stats_flush_ms;
+static int s_battery_level=-1;
+static bool s_battery_charging;
+static bool s_usb_powered;
+static int weighted_target(void);
+static int weighted_fruit_target(void);
+static int weighted_profitable_target(int stake);
 
 static int64_t now_ms(void)
 {
@@ -356,22 +368,19 @@ static int cell_award(int index)
     const fruit_track_cell_t *cell = &fruit_track[index];
     if (cell->symbol==FRUIT_SYMBOL_LUCK) return 0;
     int category = cell->symbol;
-    if (cell->multiplier==3) {
-        return s_bets[category]*3;
-    }
     int payout = cell->payout_override
         ? cell->payout_override : fruit_base_payouts[category];
-    return s_bets[category]*payout;
+    return s_bets[category]*payout*cell->multiplier;
 }
 
 static int cell_effective_multiplier(int index)
 {
     const fruit_track_cell_t *cell=&fruit_track[index];
     if (cell->luck!=FRUIT_LUCK_NONE) return 0;
-    if (cell->multiplier==3) return 3;
     if (cell->symbol>=FRUIT_CATEGORY_COUNT) return 0;
-    return cell->payout_override
+    int payout=cell->payout_override
         ?cell->payout_override:fruit_base_payouts[cell->symbol];
+    return payout*cell->multiplier;
 }
 
 static int bonus_cell_award(int index)
@@ -562,6 +571,21 @@ static void draw_inner_led_ring(void)
     }
 }
 
+static void draw_lucky_meter(void)
+{
+    /* Four small lamps centered on the inner rail, clear of the track tiles. */
+    const int center_x=BOARD_X+BOARD_SIZE/2;
+    const int y=BOARD_Y+BOARD_CELL+4;
+    for (int lamp=0;lamp<4;++lamp) {
+        int x=center_x-15+lamp*10;
+        bool lit=lamp<s_lucky_loss_count;
+        bool flash=s_lucky_spin_active && (s_led_phase&1)==0;
+        fill_circle(x,y,2,0x32100a);
+        fill_circle(x,y,1,lit?(flash?0xffffff:0xffbd20):0x64180e);
+        if (lit) pixel(x,y,flash?0xffff8a:0xffff3a);
+    }
+}
+
 static void draw_mini_seven_segment_digit(int digit, int x, int y,
                                           uint32_t color)
 {
@@ -685,6 +709,41 @@ static void draw_header_label(const char *value, int x, int y)
             }
         }
         x+=4;
+    }
+}
+
+static void draw_battery_status(void)
+{
+    const int body_x=112;
+    const int body_y=1;
+    const int body_w=21;
+    const int body_h=4;
+    const int inner_w=body_w-2;
+    const uint32_t color=0xff6848;
+
+    fill_rect(body_x,0,23,6,0x090705);
+    fill_rect(body_x+1,body_y,body_w-2,1,color);
+    fill_rect(body_x+1,body_y+body_h-1,body_w-2,1,color);
+    fill_rect(body_x,body_y+1,1,body_h-2,color);
+    if (s_battery_level<0) {
+        pixel(body_x+8,body_y+1,color);
+        pixel(body_x+11,body_y+2,color);
+        return;
+    }
+    int fill_w=(s_battery_level*inner_w+99)/100;
+    if (fill_w>inner_w) fill_w=inner_w;
+    if (fill_w>0) fill_rect(body_x+1,body_y+1,fill_w,body_h-2,color);
+    if (s_battery_charging) {
+        const int bolt_x=body_x+body_w/2;
+        fill_rect(bolt_x-3,body_y+1,7,body_h-2,0x090705);
+        pixel(bolt_x+3,body_y+1,color);
+        pixel(bolt_x+2,body_y+1,color);
+        pixel(bolt_x+1,body_y+1,color);
+        pixel(bolt_x,body_y+1,color);
+        pixel(bolt_x-3,body_y+2,color);
+        pixel(bolt_x-2,body_y+2,color);
+        pixel(bolt_x-1,body_y+2,color);
+        pixel(bolt_x,body_y+2,color);
     }
 }
 
@@ -974,11 +1033,79 @@ static void draw_center(void)
 
 static void draw_feedback_message(void)
 {
-    if (s_message==MSG_READY || s_message==MSG_MISS ||
-        s_message==MSG_WIN || s_message==MSG_GAMBLE) return;
+    const int cx=BOARD_X+BOARD_CELL*7/2;
+    if (s_state==STATE_PENDING_WIN) {
+        char win[24];
+        char risk[24];
+        char safe[24];
+        int percentage=fruit_gamble_percentages[s_gamble_level];
+        int safe_amount=s_pending_win-s_gamble_amount;
+        snprintf(win,sizeof(win),"WIN %d",s_pending_win);
+        snprintf(risk,sizeof(risk),"RISK %d%%",percentage);
+        snprintf(safe,sizeof(safe),"SAFE %d",safe_amount);
+        int width=text_width(win,1);
+        int candidate=text_width(risk,1);
+        if (candidate>width) width=candidate;
+        candidate=text_width(safe,1);
+        if (candidate>width) width=candidate;
+        width+=8;
+        if (width>89) width=89;
+        const int y=BOARD_Y+BOARD_CELL+37;
+        fill_rect(cx-width/2,y,width,31,0x160a08);
+        rect(cx-width/2,y,width,31,0xff9d00);
+        centered_text(win,cx,y+2,1,0xffe4a3);
+        centered_text(risk,cx,y+12,1,0xffc43d);
+        centered_text(safe,cx,y+22,1,0x9dff7a);
+        return;
+    }
+    bool result_status=s_round_settled &&
+        (s_message==MSG_MISS || s_message==MSG_WIN ||
+         s_message==MSG_GAMBLE);
+    if (result_status) {
+        char bet[24];
+        char win[24];
+        char net[24];
+        int paid_stake=s_current_spin_free?0:s_last_stake;
+        snprintf(bet,sizeof(bet),"BET %d",paid_stake);
+        snprintf(win,sizeof(win),"WIN %d",s_last_award);
+        snprintf(net,sizeof(net),"NET %c%d",
+                 s_last_net>=0?'+':'-',abs(s_last_net));
+        int width=text_width(bet,1);
+        int candidate=text_width(win,1);
+        if (candidate>width) width=candidate;
+        candidate=text_width(net,1);
+        if (candidate>width) width=candidate;
+        width+=8;
+        if (width>89) width=89;
+        const int y=BOARD_Y+BOARD_CELL+37;
+        fill_rect(cx-width/2,y,width,31,0x160a08);
+        rect(cx-width/2,y,width,31,0xff9d00);
+        centered_text(bet,cx,y+2,1,0xffe4a3);
+        centered_text(win,cx,y+12,1,0xffe4a3);
+        centered_text(net,cx,y+22,1,
+                      s_last_net>=0?0x9dff7a:0xff8a70);
+        return;
+    }
+    if (s_state==STATE_BONUS_CHAIN) {
+        char top[24];
+        char bottom[24];
+        snprintf(top,sizeof(top),"STEP +%d",s_bonus_step_award);
+        snprintf(bottom,sizeof(bottom),"TOTAL %d",s_bonus_award);
+        int width=text_width(top,1);
+        int bottom_width=text_width(bottom,1);
+        if (bottom_width>width) width=bottom_width;
+        width+=8;
+        if (width>89) width=89;
+        const int y=BOARD_Y+BOARD_CELL+47;
+        fill_rect(cx-width/2,y,width,21,0x160a08);
+        rect(cx-width/2,y,width,21,0xff9d00);
+        centered_text(top,cx,y+2,1,0xffe4a3);
+        centered_text(bottom,cx,y+12,1,0x9dff7a);
+        return;
+    }
+    if (s_message==MSG_READY) return;
     char buffer[24];
     const char *message=message_text(buffer,sizeof(buffer));
-    const int cx=BOARD_X+BOARD_CELL*7/2;
     const int y=BOARD_Y+BOARD_CELL+57;
     int width=text_width(message,1)+8;
     if (width>89) width=89;
@@ -1006,6 +1133,7 @@ static void draw_header(void)
     fill_rect(76,6,1,14,0xb45924);
     draw_header_label("BONUS WIN",3,0);
     draw_header_label("CREDIT",78,0);
+    draw_battery_status();
     draw_header_number(
         s_state==STATE_PENDING_WIN?s_gamble_amount:s_pending_win,23,6,3);
     draw_header_number(s_stats.credit,98,6,3);
@@ -1211,6 +1339,7 @@ static void render(void)
     draw_track();
     draw_center();
     draw_inner_led_ring();
+    draw_lucky_meter();
     draw_controls();
     draw_bets();
     draw_selected_control_cursor();
@@ -1362,6 +1491,8 @@ static void reset_credit(void)
     }
     int old_credit=s_stats.credit;
     s_stats.credit=0;
+    s_lucky_loss_count=0;
+    s_lucky_spin_active=false;
     s_big_bang_armed=true;
     s_stats.big_bang_armed=1;
     s_message=MSG_CREDIT_RESET;
@@ -1433,8 +1564,19 @@ static void settle_round_once(int award, int multiplier)
         return;
     }
     s_round_settled=true;
-    ESP_LOGI(TAG,"settle once award=%d effective_multiplier=%d",
-             award,multiplier);
+    int paid_stake=s_current_spin_free?0:s_last_stake;
+    s_last_net=award-paid_stake;
+    if (!s_current_spin_free) {
+        if (award>s_last_stake || s_lucky_spin_active) {
+            s_lucky_loss_count=0;
+        } else if (s_lucky_loss_count<4) {
+            ++s_lucky_loss_count;
+        }
+    }
+    ESP_LOGI(TAG,
+             "settle once award=%d stake=%d net=%d effective_multiplier=%d lucky_lamps=%u lucky_spin=%d",
+             award,paid_stake,s_last_net,multiplier,
+             (unsigned)s_lucky_loss_count,s_lucky_spin_active);
     play_stop_result_sound(award,multiplier);
     enter_gamble_or_settle(award);
 }
@@ -1450,6 +1592,7 @@ static void start_bonus_chain(void)
         fruit_game_tuning.blue_luck_min_cells+1;
     s_bonus_steps=fruit_game_tuning.blue_luck_min_cells+(esp_random()%span);
     s_bonus_award=0;
+    s_bonus_step_award=0;
     s_bonus_peak_multiplier=0;
     s_next_step_ms=now_ms()+fruit_game_tuning.blue_luck_step_ms;
     s_state=STATE_BONUS_CHAIN;
@@ -1458,14 +1601,29 @@ static void start_bonus_chain(void)
     ESP_LOGI(TAG,"five-light start cells=%d",s_bonus_steps);
 }
 
+static int weighted_luck_multiplier(void)
+{
+    uint32_t total=0;
+    for (int i=0;i<fruit_luck_multiplier_count;++i) {
+        total+=fruit_luck_multiplier_weights[i];
+    }
+    uint32_t draw=esp_random()%total;
+    for (int i=0;i<fruit_luck_multiplier_count;++i) {
+        if (draw<fruit_luck_multiplier_weights[i]) {
+            return fruit_luck_multipliers[i];
+        }
+        draw-=fruit_luck_multiplier_weights[i];
+    }
+    return fruit_luck_multipliers[0];
+}
+
 static void finish_spin(void)
 {
     const fruit_track_cell_t *cell=&fruit_track[s_highlight];
     ++s_stats.total_rounds;
     s_result_number=s_highlight;
     if (cell->luck==FRUIT_LUCK_ORANGE) {
-        int multiplier=fruit_luck_multipliers[
-            esp_random()%fruit_luck_multiplier_count];
+        int multiplier=weighted_luck_multiplier();
         int award=s_last_stake*multiplier;
         s_message=MSG_LUCK_LEFT;
         ESP_LOGI(TAG,"left LUCK stake=%d multiplier=%d award=%d",
@@ -1494,13 +1652,64 @@ static int weighted_target(void)
     return 0;
 }
 
+static int weighted_fruit_target(void)
+{
+    uint32_t total=0;
+    for (int i=0;i<FRUIT_TRACK_COUNT;++i) {
+        if (fruit_track[i].symbol!=FRUIT_SYMBOL_LUCK) {
+            total+=fruit_track[i].weight;
+        }
+    }
+    uint32_t draw=esp_random()%total;
+    for (int i=0;i<FRUIT_TRACK_COUNT;++i) {
+        if (fruit_track[i].symbol==FRUIT_SYMBOL_LUCK) continue;
+        if (draw<fruit_track[i].weight) return i;
+        draw-=fruit_track[i].weight;
+    }
+    return 0;
+}
+
+static int weighted_profitable_target(int stake)
+{
+    int nearest_award=INT_MAX;
+    uint32_t total=0;
+    for (int i=0;i<FRUIT_TRACK_COUNT;++i) {
+        if (fruit_track[i].luck!=FRUIT_LUCK_NONE) continue;
+        int award=cell_award(i);
+        if (award<=stake) continue;
+        if (award<nearest_award) {
+            nearest_award=award;
+            total=fruit_track[i].weight;
+        } else if (award==nearest_award) {
+            total+=fruit_track[i].weight;
+        }
+    }
+    if (total>0) {
+        uint32_t draw=esp_random()%total;
+        for (int i=0;i<FRUIT_TRACK_COUNT;++i) {
+            if (fruit_track[i].luck!=FRUIT_LUCK_NONE ||
+                cell_award(i)!=nearest_award) continue;
+            if (draw<fruit_track[i].weight) return i;
+            draw-=fruit_track[i].weight;
+        }
+    }
+    /* The orange WOW is a guaranteed fallback: its minimum is 5 x stake. */
+    for (int i=0;i<FRUIT_TRACK_COUNT;++i) {
+        if (fruit_track[i].luck==FRUIT_LUCK_ORANGE) return i;
+    }
+    return weighted_target();
+}
+
 static esp_err_t run_logic_self_test(void)
 {
     static const uint16_t expected_payouts[FRUIT_CATEGORY_COUNT] = {
-        0, 40, 30, 20, 20, 15, 10, 5,
+        0, 40, 30, 20, 25, 15, 10, 5,
     };
     static const uint8_t expected_luck_multipliers[] = {
-        2, 3, 5, 8, 10, 20, 20,
+        5, 10, 15, 20, 30, 40, 60,
+    };
+    static const uint8_t expected_luck_weights[] = {
+        40, 25, 15, 10, 5, 3, 2,
     };
     if (gem_level_from_credit(99)!=1 ||
         gem_level_from_credit(100)!=2 ||
@@ -1519,6 +1728,9 @@ static esp_err_t run_logic_self_test(void)
     if (fruit_luck_multiplier_count!=sizeof(expected_luck_multipliers) ||
         memcmp(fruit_luck_multipliers,expected_luck_multipliers,
                sizeof(expected_luck_multipliers))!=0 ||
+        memcmp(fruit_luck_multiplier_weights,expected_luck_weights,
+               sizeof(expected_luck_weights))!=0 ||
+        fruit_game_tuning.blue_luck_step_ms!=650 ||
         fruit_game_tuning.blue_luck_min_cells!=5 ||
         fruit_game_tuning.blue_luck_max_cells!=5) {
         ESP_LOGE(TAG,"LUCK config invalid");
@@ -1580,67 +1792,131 @@ static esp_err_t run_logic_self_test(void)
     uint32_t all_fixed_weighted_award=0;
     uint32_t all_net_win_weight=0;
     uint32_t left_luck_weight=0;
-    uint32_t luck_multiplier_sum=0;
+    uint32_t right_luck_weight=0;
+    uint32_t fruit_weight=0;
+    uint32_t luck_weight_sum=0;
+    uint32_t luck_weighted_multiplier_sum=0;
     int all_stake=total_bet();
     for (int i=0;i<fruit_luck_multiplier_count;++i) {
-        luck_multiplier_sum+=fruit_luck_multipliers[i];
+        luck_weight_sum+=fruit_luck_multiplier_weights[i];
+        luck_weighted_multiplier_sum+=fruit_luck_multipliers[i]*
+            fruit_luck_multiplier_weights[i];
     }
     for (int i=0;i<FRUIT_TRACK_COUNT;++i) {
         const fruit_track_cell_t *cell=&fruit_track[i];
         total_weight+=cell->weight;
-        int expected=cell->symbol==FRUIT_SYMBOL_LUCK?0:
-            cell->multiplier==3?3:
-            cell->payout_override?cell->payout_override:
-            fruit_base_payouts[cell->symbol];
+        int expected=0;
+        if (cell->symbol!=FRUIT_SYMBOL_LUCK) {
+            int base=cell->payout_override?cell->payout_override:
+                fruit_base_payouts[cell->symbol];
+            expected=base*cell->multiplier;
+        }
         if (cell_award(i)!=expected) {
             memcpy(s_bets,saved_bets,sizeof(s_bets));
             ESP_LOGE(TAG,"award rule invalid at cell=%d",i);
             return ESP_ERR_INVALID_ARG;
         }
-        int balance_award=expected;
         if (cell->luck==FRUIT_LUCK_BLUE) {
-            balance_award=0;
-            for (int step=1;step<=5;++step) {
-                balance_award+=bonus_cell_award(
-                    (i+step)%FRUIT_TRACK_COUNT);
-            }
+            right_luck_weight+=cell->weight;
+            all_net_win_weight+=cell->weight;
+            continue;
         } else if (cell->luck==FRUIT_LUCK_ORANGE) {
             left_luck_weight+=cell->weight;
+            all_net_win_weight+=cell->weight;
             continue;
         }
-        all_fixed_weighted_award+=cell->weight*balance_award;
-        if (balance_award>all_stake) all_net_win_weight+=cell->weight;
+        fruit_weight+=cell->weight;
+        all_fixed_weighted_award+=cell->weight*expected;
+        if (expected>all_stake) all_net_win_weight+=cell->weight;
     }
-    all_net_win_weight+=left_luck_weight;
+    /*
+     * Left WOW uses its configured weighted multiplier distribution. Right
+     * WOW performs five independent fruit-only draws, redrawing WOW results.
+     * Keep the expectation calculation integer with a shared denominator.
+     */
     uint64_t expected_award_numerator=
-        (uint64_t)all_fixed_weighted_award*fruit_luck_multiplier_count+
-        (uint64_t)left_luck_weight*all_stake*luck_multiplier_sum;
-    uint32_t expected_award_denominator=
-        total_weight*fruit_luck_multiplier_count;
+        (uint64_t)all_fixed_weighted_award*luck_weight_sum*fruit_weight+
+        (uint64_t)left_luck_weight*all_stake*
+            luck_weighted_multiplier_sum*fruit_weight+
+        (uint64_t)right_luck_weight*5*all_fixed_weighted_award*
+            luck_weight_sum;
+    uint64_t expected_award_denominator=
+        (uint64_t)total_weight*luck_weight_sum*fruit_weight;
     uint32_t all_rtp_basis_points=(uint32_t)(
-        expected_award_numerator*10000/
+        expected_award_numerator*10000ULL/
         (expected_award_denominator*all_stake));
     uint32_t net_win_basis_points=
         all_net_win_weight*10000/total_weight;
-    if (total_weight!=41 ||
-        all_rtp_basis_points<10500 || all_rtp_basis_points>11200 ||
-        net_win_basis_points<2500 || net_win_basis_points>3500) {
+    int nearest_profitable_award=INT_MAX;
+    for (int i=0;i<FRUIT_TRACK_COUNT;++i) {
+        if (fruit_track[i].luck!=FRUIT_LUCK_NONE) continue;
+        int award=cell_award(i);
+        if (award>all_stake && award<nearest_profitable_award) {
+            nearest_profitable_award=award;
+        }
+    }
+    for (int draw=0;draw<100;++draw) {
+        int target=weighted_profitable_target(all_stake);
+        if (fruit_track[target].luck!=FRUIT_LUCK_NONE ||
+            cell_award(target)!=nearest_profitable_award) {
+            memcpy(s_bets,saved_bets,sizeof(s_bets));
+            ESP_LOGE(TAG,"lucky target invalid target=%d award=%d",
+                     target,cell_award(target));
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+    /*
+     * Four consecutive non-net wins arm the fifth paid spin. The lucky spin
+     * chooses the nearest profitable ordinary result, keeping the protection
+     * useful without turning the long-run return into an uncontrolled jackpot.
+     */
+    uint64_t non_win_weight=total_weight-all_net_win_weight;
+    uint64_t normal_state_weight=0;
+    uint64_t state_term=1;
+    for (int state=0;state<4;++state) {
+        uint64_t total_power=1;
+        for (int p=state;p<4;++p) total_power*=total_weight;
+        normal_state_weight+=state_term*total_power;
+        state_term*=non_win_weight;
+    }
+    uint64_t lucky_state_weight=state_term;
+    uint64_t all_state_weight=normal_state_weight+lucky_state_weight;
+    uint32_t lucky_rtp_basis_points=
+        nearest_profitable_award*10000/all_stake;
+    uint32_t protected_rtp_basis_points=(uint32_t)(
+        ((uint64_t)all_rtp_basis_points*normal_state_weight+
+         (uint64_t)lucky_rtp_basis_points*lucky_state_weight)/
+        all_state_weight);
+    uint32_t protected_net_win_basis_points=(uint32_t)(
+        ((uint64_t)net_win_basis_points*normal_state_weight+
+         10000ULL*lucky_state_weight)/all_state_weight);
+    if (total_weight!=60 || fruit_weight!=58 || luck_weight_sum!=100 ||
+        all_rtp_basis_points<10000 || all_rtp_basis_points>11000 ||
+        protected_rtp_basis_points<10300 ||
+        protected_rtp_basis_points>10600 ||
+        net_win_basis_points<2500 || net_win_basis_points>3500 ||
+        protected_net_win_basis_points<3700 ||
+        protected_net_win_basis_points>4000) {
         memcpy(s_bets,saved_bets,sizeof(s_bets));
         ESP_LOGE(TAG,
-                 "balance invalid weight=%lu rtp_bp=%lu net_win_bp=%lu",
+                 "balance invalid weight=%lu base_rtp_bp=%lu protected_rtp_bp=%lu base_net_win_bp=%lu protected_net_win_bp=%lu",
                  (unsigned long)total_weight,
                  (unsigned long)all_rtp_basis_points,
-                 (unsigned long)net_win_basis_points);
+                 (unsigned long)protected_rtp_basis_points,
+                 (unsigned long)net_win_basis_points,
+                 (unsigned long)protected_net_win_basis_points);
         return ESP_ERR_INVALID_ARG;
     }
     memcpy(s_bets,saved_bets,sizeof(s_bets));
     size_t heap_after=heap_caps_get_free_size(MALLOC_CAP_8BIT);
     ESP_LOGI(TAG,
-             "1000-round logic self-test PASS heap_delta=%d weight=%lu rtp_bp=%lu net_win_bp=%lu",
+             "1000-round logic self-test PASS heap_delta=%d weight=%lu base_rtp_bp=%lu protected_rtp_bp=%lu base_net_win_bp=%lu protected_net_win_bp=%lu",
              (int)heap_after-(int)heap_before,
              (unsigned long)total_weight,
              (unsigned long)all_rtp_basis_points,
-             (unsigned long)net_win_basis_points);
+             (unsigned long)protected_rtp_basis_points,
+             (unsigned long)net_win_basis_points,
+             (unsigned long)protected_net_win_basis_points);
     return ESP_OK;
 }
 
@@ -1662,11 +1938,14 @@ static void start_spin(bool free_spin)
     }
     else if (s_free_spins>0) --s_free_spins;
     s_current_spin_free=free_spin;
+    s_lucky_spin_active=!free_spin && s_lucky_loss_count>=4;
     s_round_settled=false;
     s_last_stake=stake;
     s_last_award=0;
+    s_last_net=0;
     s_pending_win=0; s_result_number=0;
-    s_spin_target=weighted_target();
+    s_spin_target=s_lucky_spin_active?
+        weighted_profitable_target(stake):weighted_target();
     int fixed_steps=fruit_game_tuning.spin_accel_steps+
         fruit_game_tuning.spin_steady_laps*FRUIT_TRACK_COUNT+
         fruit_game_tuning.spin_decel_min_steps+
@@ -1682,8 +1961,10 @@ static void start_spin(bool free_spin)
     s_message=free_spin?MSG_FREE_SPIN:MSG_SPIN;
     play_sound(FRUIT_SOUND_START);
     mark_stats_dirty();
-    ESP_LOGI(TAG,"spin start stake=%d free=%d target=%d credit=%ld",
-             stake,free_spin,s_spin_target,(long)s_stats.credit);
+    ESP_LOGI(TAG,
+             "spin start stake=%d free=%d target=%d credit=%ld lucky_lamps=%u lucky_spin=%d",
+             stake,free_spin,s_spin_target,(long)s_stats.credit,
+             (unsigned)s_lucky_loss_count,s_lucky_spin_active);
     render();
 }
 
@@ -1708,6 +1989,7 @@ static void bank_pending(void)
     if (s_state!=STATE_PENDING_WIN) return;
     int banked=s_pending_win;
     s_last_award=banked;
+    s_last_net=banked-s_last_stake;
     if (banked>s_stats.highest_single_win) {
         s_stats.highest_single_win=banked;
     }
@@ -1950,9 +2232,10 @@ static void update_game(void)
         }
         render();
     } else if (s_state==STATE_BONUS_CHAIN && now>=s_next_step_ms) {
-        s_highlight=(s_highlight+1)%FRUIT_TRACK_COUNT;
+        s_highlight=weighted_fruit_target();
         ++s_led_phase;
         int step_award=bonus_cell_award(s_highlight);
+        s_bonus_step_award=step_award;
         int step_multiplier=cell_effective_multiplier(s_highlight);
         s_bonus_award+=step_award;
         if (step_award>0 && step_multiplier>s_bonus_peak_multiplier) {
@@ -2339,6 +2622,34 @@ static void persistence_task(void *arg)
     }
 }
 
+static void battery_task(void *arg)
+{
+    (void)arg;
+    while (true) {
+        int level=-1;
+        bool charging=false;
+        bool usb_powered=false;
+        bool level_ok=vibe_board_battery_level(&level)==ESP_OK;
+        bool charging_ok=vibe_board_battery_charging(&charging)==ESP_OK;
+        bool usb_ok=vibe_board_usb_powered(&usb_powered)==ESP_OK;
+        if (lvgl_lock()) {
+            bool changed=(level_ok && level!=s_battery_level) ||
+                (charging_ok && charging!=s_battery_charging) ||
+                (usb_ok && usb_powered!=s_usb_powered);
+            if (level_ok) s_battery_level=level;
+            if (charging_ok) s_battery_charging=charging;
+            if (usb_ok) s_usb_powered=usb_powered;
+            if (changed) {
+                ESP_LOGI(TAG,"battery status level=%d charging=%d usb=%d",
+                         s_battery_level,s_battery_charging,s_usb_powered);
+                render();
+            }
+            lvgl_unlock();
+        }
+        vTaskDelay(pdMS_TO_TICKS(BATTERY_POLL_MS));
+    }
+}
+
 static void motion_task(void *arg)
 {
     (void)arg;
@@ -2518,7 +2829,7 @@ static void motion_task(void *arg)
 void app_main(void)
 {
     ESP_LOGI(TAG,
-             "boot VibeStick Fruit Machine 0.6.3 bet-decrease");
+             "boot VibeStick Fruit Machine 0.7.0 lucky-protection");
     esp_err_t result=nvs_flash_init();
     if (result==ESP_ERR_NVS_NO_FREE_PAGES ||
         result==ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -2527,6 +2838,12 @@ void app_main(void)
     load_stats();
     ESP_ERROR_CHECK(run_logic_self_test());
     ESP_ERROR_CHECK_WITHOUT_ABORT(vibe_board_init_power());
+    ESP_ERROR_CHECK_WITHOUT_ABORT(vibe_board_battery_level(&s_battery_level));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(
+        vibe_board_battery_charging(&s_battery_charging));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(vibe_board_usb_powered(&s_usb_powered));
+    ESP_LOGI(TAG,"battery initial level=%d charging=%d usb=%d",
+             s_battery_level,s_battery_charging,s_usb_powered);
     esp_err_t imu_status=vibe_board_imu_init();
     if (imu_status!=ESP_OK) {
         ESP_LOGW(TAG,"motion navigation disabled: %s",esp_err_to_name(imu_status));
@@ -2539,6 +2856,7 @@ void app_main(void)
     ESP_ERROR_CHECK(init_buttons());
     xTaskCreate(app_task,"fruit_game",4096,NULL,4,NULL);
     xTaskCreate(persistence_task,"fruit_save",3072,NULL,2,NULL);
+    xTaskCreate(battery_task,"fruit_battery",3072,NULL,2,NULL);
     if (imu_status==ESP_OK) {
         xTaskCreate(motion_task,"fruit_motion",3072,NULL,3,NULL);
     }

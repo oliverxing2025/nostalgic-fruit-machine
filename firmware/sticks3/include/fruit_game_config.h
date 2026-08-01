@@ -70,6 +70,7 @@ extern const uint16_t fruit_base_payouts[FRUIT_CATEGORY_COUNT];
 extern const uint8_t fruit_bet_costs[FRUIT_CATEGORY_COUNT];
 extern const fruit_track_cell_t fruit_track[FRUIT_TRACK_COUNT];
 extern const uint8_t fruit_luck_multipliers[];
+extern const uint8_t fruit_luck_multiplier_weights[];
 extern const uint8_t fruit_luck_multiplier_count;
 extern const uint8_t fruit_gamble_percentages[FRUIT_GAMBLE_LEVEL_COUNT];
 extern const fruit_game_tuning_t fruit_game_tuning;
