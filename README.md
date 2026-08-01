@@ -7,6 +7,7 @@
   </p>
   <p>
     <a href="#overview">Overview</a> ·
+    <a href="#whats-new-in-v063">v0.6.3</a> ·
     <a href="#complete-controls">Controls</a> ·
     <a href="#game-rules">Game rules</a> ·
     <a href="#gem-collection">Gems</a> ·
@@ -23,6 +24,35 @@
   <br>
   <img src="assets/screenshots/fruit-machine-new-icons-neon-showcase.jpg" alt="Nostalgic Fruit Machine with its new fruit, crown, diamond, 99, SUP, and WOW artwork in a neon arcade" width="900">
 </div>
+
+## What's new in v0.6.3
+
+Released on August 1, 2026. Download the firmware and view the complete notes
+on the [v0.6.3 release page](https://github.com/oliverxing2025/nostalgic-fruit-machine/releases/tag/v0.6.3).
+
+- **Current-credit gems:** a new gem activates when the live `CREDIT` balance
+  first reaches its threshold. Previously spent credit is not accumulated.
+- **Permanent collection:** once activated, a gem stays lit after spending,
+  resetting, or entering a negative balance.
+- **Safe migration:** existing saved data discards the old cumulative-winnings
+  counter and restores the permanent gem level from the highest credit balance
+  previously reached.
+- **One-step bet reduction:** short-press the front blue button to add one to
+  the selected symbol; long-press for about 0.9 seconds to subtract one. A
+  prepaid unit is refunded automatically.
+
+### Upgrade paths
+
+| Download | Flash offset | Use it when | Saved data |
+| --- | ---: | --- | --- |
+| `Nostalgic-Fruit-Machine-v0.6.3-app.bin` | `0x20000` | Updating a device whose identity and compatible partition layout have already been verified | Preserves NVS credit, statistics, bets, and gem state |
+| `Nostalgic-Fruit-Machine-v0.6.3-full.bin` | `0x0` | Clean standalone installation, or intentionally replacing the existing firmware layout | Resets NVS and all saved game data |
+
+> [!WARNING]
+> Verify the physical device identity, partition layout, image, and offset
+> before writing. The full image can replace a multi-firmware installation and
+> erase saved Fruit Machine data. The application-only image is safe only for
+> an already verified compatible layout.
 
 ## Overview
 
